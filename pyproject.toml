@@ -1,0 +1,17 @@
+[project]
+name = "nlp-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "datasets>=4.8.3",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/common",
+    "packages/training",
+    "packages/inference",
+    "packages/data_prep",
+]
