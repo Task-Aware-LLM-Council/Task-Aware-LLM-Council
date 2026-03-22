@@ -60,7 +60,7 @@ Fill in your preferred command format for each item below.
 
 ### Data preparation scripts
 
-- Build common datase
+- Build common dataset
 ```
 uv run -m data_prep.build_router_dataset  
 - Modify parquet files using the provided notebook (update_parquet_files.ipynb) or custom scripts as needed. Handle the parquet files as pandas dataframe and make modifications, then save back to the same location to update the dataset splits.
