@@ -9,7 +9,7 @@ if __name__ == "__main__":
     parser.add_argument("--folder-path", required=True,
                         help="Path to the dataset folder")
     parser.add_argument("--repo-id", required=False,
-                        help="Hugging Face repository ID", default="mbhaskar98/router-dataset")
+                        help="Hugging Face repository ID", default="task-aware-llm-council/router_dataset")
     parser.add_argument("--commit-message", required=True,
                         help="Commit message for the upload")
 

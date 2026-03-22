@@ -56,9 +56,6 @@ def main():
 
     save_datasetdict_parquet(ds, "data/router_dataset")
 
-    # # one-time public publish
-    # push_to_hub(ds, "mbhaskar98/router-dataset")
-
 
 if __name__ == "__main__":
     main()
