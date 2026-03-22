@@ -13,11 +13,26 @@ Monorepo for building, packaging, and consuming a router dataset for NLP workflo
 - Clone the repository and move into the project root.
 - Run `uv sync` to install dependencies and set up the workspace.
 
-<!-- ### Recommended uv workflow
-
-1. Use `uv sync` when dependencies change.
-2. Use `uv run ...` to execute scripts without manually activating the environment.
-3. Use workspace-aware sync/install options when working across all packages.
+### Recommended uv workflow
+- Keep everything as separate packages under `packages/` for better modularity and dependency management.
+```
+uv init --lib packages/<package_name>
+```
+- Use `uv sync` when dependencies change (from root folder).
+- Use `uv add <dependency>` to add dependencies to specific packages.
+```
+cd packages/<package_1>
+uv add <package_2>  # Adds package_2 as a dependency to package_1
+cd ../../
+uv lock  # Update the lockfile after adding dependencies
+uv sync  # Sync the workspace to install new dependencies
+```
+- Use `uv run` to execute scripts without manually activating the environment.
+```
+ uv run -m <package_name>.<script_name>
+```
+- Use workspace-aware sync/install options when working across all packages.
+- Make sure to select correct interpreters in VSCode (Ctrl+Shift+P > Python: Select Interpreter) to get proper linting and IntelliSense.
 
 ## Project Structure
 
@@ -26,7 +41,7 @@ NLP-Project/
 |- pyproject.toml              # Root uv workspace config
 |- main.py                     # Root entry script (placeholder)
 |- data/
-|  |- router_dataset_v1/       # Local parquet exports
+|  |- router_dataset/       # Local parquet exports
 |- packages/
 |  |- common/
 |  |  |- src/common/           # Shared schemas, IO, IDs, split/util helpers
@@ -45,11 +60,16 @@ Fill in your preferred command format for each item below.
 
 ### Data preparation scripts
 
-- Build merged router dataset from multiple sources.
-- Source-specific dataset loaders (MuSiQue, QuALITY, FEVER, HARDMATH, HumanEvalPlus).
-- Upload/publish dataset artifacts.
-
-### Training scripts
+- Build common dataset
+```
+uv run -m data_prep.build_router_dataset  
+- Modify parquet files using the provided notebook (update_parquet_files.ipynb) or custom scripts as needed. Handle the parquet files as pandas dataframe and make modifications, then save back to the same location to update the dataset splits.
+```
+- Upload to Hugging Face Hub (ask for token if you don't have it)
+```
+uv run -m data_prep.upload_dataset --folder-path='./data/router_dataset' --commit-message="<commit message>"
+```
+<!-- ### Training scripts
 
 - Consume/inspect prepared dataset splits for downstream training workflows.
 
