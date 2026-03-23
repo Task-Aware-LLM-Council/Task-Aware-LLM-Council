@@ -1,6 +1,6 @@
 # Task-Aware LLM Council
 
-Monorepo for building, packaging, and consuming a router dataset for NLP workflows.
+Monorepo for building, packaging, and consuming a router dataset for NLP workflow.
 
 ## Project Setup (uv)
 
