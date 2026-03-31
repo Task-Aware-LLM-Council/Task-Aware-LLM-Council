@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+import llm_gateway
+
+
+def test_public_api_exports_documented_symbols() -> None:
+    exported_names = {
+        "BaseLLMClient",
+        "ClientInfo",
+        "HTTPErrorPolicy",
+        "create_client",
+        "OpenAIClient",
+        "OpenAICompatibleClient",
+        "OpenRouterClient",
+        "LLMClientError",
+        "LLMRequestError",
+        "LLMRateLimitError",
+        "LLMResponseError",
+        "LLMTransportError",
+        "Message",
+        "PromptRequest",
+        "PromptResponse",
+        "Provider",
+        "ProviderConfig",
+        "RetryPolicy",
+        "ResponseChoice",
+        "Usage",
+    }
+
+    for name in exported_names:
+        assert hasattr(llm_gateway, name), f"missing public export: {name}"
