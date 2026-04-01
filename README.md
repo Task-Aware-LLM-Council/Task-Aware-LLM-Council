@@ -51,6 +51,8 @@ NLP-Project/
 |  |  |- src/training/         # Dataset consumption/training-facing scripts
 |  |- inference/
 |  |  |- src/inference/        # Inference package scaffold
+|  |- llm_gateway/
+|  |  |- src/llm_gateway/        # client layer for text-generation style LLM calls
 |- update_parquet_files.ipynb  # Notebook utility for parquet updates
 ```
 

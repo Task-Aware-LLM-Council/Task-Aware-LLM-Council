@@ -57,7 +57,3 @@ __all__ = [
     "OpenAICompatibleClient",
     "OpenRouterClient",
 ]
-
-
-def main() -> None:
-    print("llm_gateway package")
