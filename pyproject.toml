@@ -15,4 +15,5 @@ members = [
     "packages/inference",
     "packages/data_prep",
     "packages/llm_gateway",
+    "packages/council",
 ]
