@@ -8,6 +8,9 @@ Use provider-specific wrappers for common cases and `create_client(...)` when
 the caller wants config-driven client construction.
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from llm_gateway.base import (
     BaseLLMClient,
     ClientInfo,

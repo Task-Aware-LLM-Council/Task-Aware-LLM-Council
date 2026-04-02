@@ -15,4 +15,7 @@ members = [
     "packages/inference",
     "packages/data_prep",
     "packages/llm_gateway",
+    "packages/benchmarking_pipeline",
+    "packages/benchmark_runner",
+    "packages/task_eval",
 ]

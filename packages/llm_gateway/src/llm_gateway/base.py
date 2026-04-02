@@ -275,10 +275,11 @@ class BaseLLMClient(ABC):
                 attempt_number,
                 retry_after_seconds=retry_after_seconds,
             )
-            print(f"attempt_number:{attempt_number} delay_seconds:{delay_seconds}")
+            print(f"Request failed, attempt_number:{attempt_number}, try after:{delay_seconds}, last_error:{last_error}")
             last_delay_seconds = delay_seconds
             await asyncio.sleep(delay_seconds)
 
+        print(f"Request failed completely, last_error:{last_error}")
         if last_error is None:
             raise LLMClientError(
                 f"{self.provider} request failed without an explicit error")
