@@ -6,9 +6,7 @@ from llm_gateway import Provider, ProviderConfig
 from benchmark_runner.models import BenchmarkSpec, DatasetRunConfig
 
 MODEL_POOL: tuple[str, ...] = (
-    "sshleifer/tiny-gpt2",
-    "optimum-intel-internal-testing/tiny-random-gpt2",
-    # "Qwen/Qwen2.5-7B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct",
     # "openai/gpt-oss-120b",
     # "qwen/qwen-2.5-72b-instruct",
     # "qwen/qwen-2.5-coder-32b-instruct",

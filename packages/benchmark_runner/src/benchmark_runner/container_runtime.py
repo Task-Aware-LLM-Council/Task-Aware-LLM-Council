@@ -190,6 +190,8 @@ class ApptainerServerHandle:
         command: list[str] = [self.config.executable, "run"]
         if self.config.use_gpu:
             command.append("--nv")
+        
+        command.append("--cleanenv")
         if self.config.bind:
             bind_target = f"{self.config.bind}:{self.config.container_cache_dir}"
             command.extend(["--bind", bind_target])
