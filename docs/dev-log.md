@@ -43,6 +43,8 @@ Validation state:
 - unit compatibility tests are passing
 - Hugging Face live smoke path has been validated
 - OpenAI and OpenRouter smoke tests are scaffolded and ready for live credentials
+- local vLLM smoke coverage now exists behind `LOCAL_VLLM_SMOKE_*` env vars for
+  GPU-machine validation
 
 ### `benchmarking_pipeline`
 
@@ -237,6 +239,30 @@ Current observed issue from the first real run:
 
 That means the immediate runtime blocker is provider auth/config, not the
 pipeline code.
+
+## Latest Architectural Decision
+
+To avoid hosted API rate limits during first-submission benchmarking, local GPU
+inference is now routed through
+[packages/llm_gateway](/home/mbhas/USC/Sem-2/NLP/Task-Aware-LLM-Council/packages/llm_gateway)
+instead of introducing a separate package boundary for execution.
+
+Decision details:
+
+- local inference is treated as a first-class `llm_gateway` provider
+- the active local runtime target is the in-process vLLM Python API
+- one client manages one loaded local model and reuses it across requests
+- `benchmark_runner` defaults to the local provider path without requiring a
+  separate server process
+- `openai-compatible` remains available for intentionally external local
+  servers such as `vllm serve`
+- this preserves one inference surface for:
+  - single-model benchmarking now
+  - council inference later
+
+This keeps `benchmarking_pipeline` and `benchmark_runner` unchanged at the
+request/response contract level while moving local model lifecycle management
+into `llm_gateway`.
 
 ### 2. Final model pool and dataset selection
 

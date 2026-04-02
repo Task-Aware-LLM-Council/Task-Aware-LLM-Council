@@ -78,10 +78,12 @@ async def run_benchmark_suite(
     failed_examples = 0
 
     for source in sources:
+        print(f"Source - {source}")
         dataset_metadata = dict(getattr(source, "metadata", {}))
         metric = metric_resolver(source)
 
         for model in spec.models:
+            print(f"Model - {model}")
             total_pairs += 1
             pair_score_path = score_path(suite_dir, source.name, model)
             pair_summary_path = summary_path(suite_dir, source.name, model)

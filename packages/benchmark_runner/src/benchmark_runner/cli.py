@@ -6,7 +6,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from benchmark_runner.config import get_dataset_configs, get_preset_spec
+from llm_gateway import Provider
+
+from benchmark_runner.config import default_provider_config, get_dataset_configs, get_preset_spec
 from benchmark_runner.suite import run_registered_benchmark_suite
 
 
@@ -37,12 +39,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--split",
         help="Optional override applied to all selected datasets.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=("local", "vllm", "huggingface", "openai", "openrouter", "openai-compatible"),
+        help="Optional provider override. Use `local` or `vllm` for in-process local vLLM.",
+    )
+    parser.add_argument(
+        "--api-base",
+        help="Optional provider endpoint override for HTTP-backed providers such as `openai-compatible`.",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        help="Optional environment variable name for provider auth. Not needed for in-process local vLLM.",
+    )
     return parser
 
 
 async def run_cli_async(args: argparse.Namespace) -> int:
     output_root = Path(args.output_root)
     spec = get_preset_spec(args.preset, output_root=output_root)
+    if args.provider or args.api_base or args.api_key_env:
+        provider = args.provider or spec.provider_config.provider
+        if provider == "vllm":
+            provider = Provider.LOCAL
+        spec = replace(
+            spec,
+            provider_config=default_provider_config(
+                provider=provider,
+                api_base=args.api_base,
+                api_key_env=args.api_key_env,
+            ),
+        )
 
     if args.models:
         spec = replace(spec, models=tuple(args.models))

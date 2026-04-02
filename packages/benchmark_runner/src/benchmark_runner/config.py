@@ -1,14 +1,14 @@
 from __future__ import annotations
-
 from pathlib import Path
 
-from llm_gateway import Provider, ProviderConfig, create_client
+from llm_gateway import Provider, ProviderConfig
 
 from benchmark_runner.models import BenchmarkSpec, DatasetRunConfig
 
-
 MODEL_POOL: tuple[str, ...] = (
-    "Qwen/Qwen2.5-7B-Instruct",
+    "sshleifer/tiny-gpt2",
+    "optimum-intel-internal-testing/tiny-random-gpt2",
+    # "Qwen/Qwen2.5-7B-Instruct",
     # "openai/gpt-oss-120b",
     # "qwen/qwen-2.5-72b-instruct",
     # "qwen/qwen-2.5-coder-32b-instruct",
@@ -33,9 +33,25 @@ DATASET_CONFIGS: tuple[DatasetRunConfig, ...] = (
 )
 
 
-def default_provider_config() -> ProviderConfig:
+def default_provider_config(
+    *,
+    provider: Provider | str = Provider.LOCAL,
+    api_base: str | None = None,
+    api_key_env: str | None = None,
+) -> ProviderConfig:
+    normalized_provider = provider.value if isinstance(provider, Provider) else provider
+
+    if normalized_provider == Provider.LOCAL.value:
+        return ProviderConfig(
+            provider=Provider.LOCAL,
+            default_model=MODEL_POOL[0],
+            default_params={},
+        )
+
     return ProviderConfig(
-        provider=Provider.HUGGINGFACE,
+        provider=provider,
+        api_base=api_base,
+        api_key_env=api_key_env,
         default_model=MODEL_POOL[0],
     )
 
@@ -64,12 +80,11 @@ def build_benchmark_spec(
 
 
 def get_preset_spec(preset: str, *, output_root: Path) -> BenchmarkSpec:
-    print(f"get_preset_spec called {preset}, {output_root}")
     normalized = preset.strip().lower()
     if normalized == "pilot":
         return build_benchmark_spec(
             output_root=output_root,
-            max_examples_per_dataset=200,
+            max_examples_per_dataset=50,
             max_concurrency=1, batch_size=1,
             delay_between_requests=8)
     if normalized == "full":

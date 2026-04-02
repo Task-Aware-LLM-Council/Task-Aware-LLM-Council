@@ -9,6 +9,7 @@ def test_public_api_exports_documented_symbols() -> None:
         "ClientInfo",
         "HTTPErrorPolicy",
         "create_client",
+        "LocalVLLMClient",
         "OpenAIClient",
         "OpenAICompatibleClient",
         "OpenRouterClient",
@@ -29,3 +30,7 @@ def test_public_api_exports_documented_symbols() -> None:
 
     for name in exported_names:
         assert hasattr(llm_gateway, name), f"missing public export: {name}"
+
+
+def test_provider_enum_exports_local() -> None:
+    assert llm_gateway.Provider.LOCAL.value == "local"

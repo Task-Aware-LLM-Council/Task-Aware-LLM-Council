@@ -9,6 +9,7 @@ Role = Literal["system", "user", "assistant", "tool"]
 
 
 class Provider(str, Enum):
+    LOCAL = "local"
     OPENAI = "openai"
     OPENAI_COMPATIBLE = "openai-compatible"
     OPENROUTER = "openrouter"

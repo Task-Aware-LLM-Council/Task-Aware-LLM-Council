@@ -38,7 +38,7 @@ Add these to `pyproject.toml` under `[project.dependencies]`:
 ```toml
 [project]
 name = "task-aware-llm-council"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     # API & async
     "httpx>=0.27",
