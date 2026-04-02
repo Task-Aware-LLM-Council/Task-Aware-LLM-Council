@@ -5,7 +5,6 @@ import os
 import pytest
 import pytest_asyncio
 import asyncio
-from dotenv import load_dotenv
 
 from llm_gateway.factory import create_client
 from llm_gateway.models import PromptRequest, ProviderConfig, Provider, RetryPolicy
@@ -14,8 +13,6 @@ from llm_gateway.providers.openrouter import OpenRouterClient
 
 
 pytestmark = pytest.mark.smoke
-
-load_dotenv()
 
 @pytest_asyncio.fixture(autouse=True)
 async def delay_between_tests():

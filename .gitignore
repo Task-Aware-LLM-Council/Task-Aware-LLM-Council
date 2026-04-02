@@ -209,3 +209,6 @@ __marimo__/
 # Data
 data/
 *.parquet
+
+.codex
+results
