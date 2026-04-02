@@ -33,7 +33,6 @@ from llm_gateway.models import (
     Usage,
 )
 from llm_gateway.providers import (
-    LocalVLLMClient,
     OpenAIClient,
     OpenAICompatibleClient,
     OpenRouterClient,
@@ -44,7 +43,6 @@ __all__ = [
     "ClientInfo",
     "HTTPErrorPolicy",
     "create_client",
-    "LocalVLLMClient",
     "OpenAIClient",
     "LLMClientError",
     "LLMRateLimitError",

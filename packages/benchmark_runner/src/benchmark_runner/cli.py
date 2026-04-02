@@ -10,6 +10,7 @@ from llm_gateway import Provider
 
 from benchmark_runner.config import default_provider_config, get_dataset_configs, get_preset_spec
 from benchmark_runner.suite import run_registered_benchmark_suite
+from benchmark_runner.container_runtime import LOCAL_LAUNCH_IMAGE, LOCAL_LAUNCH_BIND
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,15 +43,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--provider",
         choices=("local", "vllm", "huggingface", "openai", "openrouter", "openai-compatible"),
-        help="Optional provider override. Use `local` or `vllm` for in-process local vLLM.",
+        help="Optional provider override. Use `local` or `vllm` for an external local OpenAI-compatible server.",
     )
     parser.add_argument(
         "--api-base",
-        help="Optional provider endpoint override for HTTP-backed providers such as `openai-compatible`.",
+        help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
     )
     parser.add_argument(
         "--api-key-env",
-        help="Optional environment variable name for provider auth. Not needed for in-process local vLLM.",
+        help="Optional environment variable name for provider auth. Usually not needed for local vLLM/OpenAI-compatible servers.",
     )
     return parser
 
@@ -60,15 +61,22 @@ async def run_cli_async(args: argparse.Namespace) -> int:
     spec = get_preset_spec(args.preset, output_root=output_root)
     if args.provider or args.api_base or args.api_key_env:
         provider = args.provider or spec.provider_config.provider
+
+        new_params = dict(spec.provider_config.default_params)
         if provider == "vllm":
             provider = Provider.LOCAL
+            new_params[LOCAL_LAUNCH_IMAGE] = "vllm-openai_latest.sif"
+            new_params[LOCAL_LAUNCH_BIND] = "/scratch1/bmahajan/.cache"
+        
+        base_provider_config = default_provider_config(
+            provider=provider,
+            api_base=args.api_base,
+            api_key_env=args.api_key_env,
+        )
+        configured_provider = replace(base_provider_config, default_params=new_params)
         spec = replace(
             spec,
-            provider_config=default_provider_config(
-                provider=provider,
-                api_base=args.api_base,
-                api_key_env=args.api_key_env,
-            ),
+            provider_config=configured_provider
         )
 
     if args.models:

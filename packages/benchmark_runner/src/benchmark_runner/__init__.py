@@ -13,6 +13,11 @@ from benchmark_runner.config import (
     get_dataset_configs,
     get_preset_spec,
 )
+from benchmark_runner.container_runtime import (
+    ApptainerServerConfig,
+    ApptainerServerHandle,
+    managed_local_provider_config,
+)
 from benchmark_runner.metrics import Metric, MetricResult, NullMetric
 from benchmark_runner.models import (
     AggregateMetricRow,
@@ -38,6 +43,9 @@ __all__ = [
     "default_provider_config",
     "get_dataset_configs",
     "get_preset_spec",
+    "ApptainerServerConfig",
+    "ApptainerServerHandle",
+    "managed_local_provider_config",
     "DatasetSource",
     "HuggingFaceDatasetSource",
     "IterableDatasetSource",

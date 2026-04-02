@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+from dataclasses import replace
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -71,6 +73,39 @@ def _source() -> IterableDatasetSource:
                 example=BenchmarkExample(
                     example_id="ex-3",
                     dataset_name="demo",
+                    question="Q3",
+                ),
+                reference={"answer": "Rome"},
+            ),
+        ],
+    )
+
+
+def _second_source() -> IterableDatasetSource:
+    return IterableDatasetSource(
+        name="demo_two",
+        metadata={"task": "qa"},
+        cases=[
+            BenchmarkCase(
+                example=BenchmarkExample(
+                    example_id="ex-1",
+                    dataset_name="demo_two",
+                    question="Q1",
+                ),
+                reference={"answer": "Paris"},
+            ),
+            BenchmarkCase(
+                example=BenchmarkExample(
+                    example_id="ex-2",
+                    dataset_name="demo_two",
+                    question="Q2",
+                ),
+                reference={"answer": "London"},
+            ),
+            BenchmarkCase(
+                example=BenchmarkExample(
+                    example_id="ex-3",
+                    dataset_name="demo_two",
                     question="Q3",
                 ),
                 reference={"answer": "Rome"},
@@ -214,3 +249,66 @@ async def test_run_registered_benchmark_suite_accepts_dataset_run_configs(tmp_pa
     )
 
     assert result.total_pairs == 2
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_suite_reuses_one_local_container_per_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    lifecycle_events: list[str] = []
+    pipeline_calls: list[tuple[str, str, str | None]] = []
+
+    @asynccontextmanager
+    async def fake_managed_local_provider_config(config, *, model):
+        lifecycle_events.append(f"start:{model}")
+        yield replace(config, api_base=f"http://127.0.0.1:80/{model}")
+        lifecycle_events.append(f"stop:{model}")
+
+    async def fake_local_pipeline_runner(datasets, config):
+        dataset = tuple(datasets)[0]
+        pipeline_calls.append((config.models[0], dataset.name, config.provider_config.api_base))
+        return await fake_pipeline_runner(datasets, config)
+
+    monkeypatch.setattr(
+        "benchmark_runner.suite.managed_local_provider_config",
+        fake_managed_local_provider_config,
+    )
+
+    spec = BenchmarkSpec(
+        provider_config=ProviderConfig(
+            provider=Provider.LOCAL,
+            default_model="model-a",
+            default_params={"local_launch_image": "vllm-openai.sif"},
+        ),
+        models=("model-a", "model-b"),
+        output_root=tmp_path,
+        suite_name="suite_demo",
+        batch_size=2,
+        max_concurrency=2,
+    )
+
+    result = await run_benchmark_suite(
+        (_source(), _second_source()),
+        spec,
+        metric_resolver=lambda _: ExactMatchMetric(),
+        pipeline_runner=fake_local_pipeline_runner,
+    )
+
+    assert result.total_pairs == 4
+    assert lifecycle_events == [
+        "start:model-a",
+        "stop:model-a",
+        "start:model-b",
+        "stop:model-b",
+    ]
+    assert pipeline_calls == [
+        ("model-a", "demo", "http://127.0.0.1:80/model-a"),
+        ("model-a", "demo", "http://127.0.0.1:80/model-a"),
+        ("model-a", "demo_two", "http://127.0.0.1:80/model-a"),
+        ("model-a", "demo_two", "http://127.0.0.1:80/model-a"),
+        ("model-b", "demo", "http://127.0.0.1:80/model-b"),
+        ("model-b", "demo", "http://127.0.0.1:80/model-b"),
+        ("model-b", "demo_two", "http://127.0.0.1:80/model-b"),
+        ("model-b", "demo_two", "http://127.0.0.1:80/model-b"),
+    ]

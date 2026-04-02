@@ -9,7 +9,6 @@ def test_public_api_exports_documented_symbols() -> None:
         "ClientInfo",
         "HTTPErrorPolicy",
         "create_client",
-        "LocalVLLMClient",
         "OpenAIClient",
         "OpenAICompatibleClient",
         "OpenRouterClient",

@@ -105,3 +105,42 @@ def test_cli_overrides_provider_settings(monkeypatch, tmp_path: Path, capsys) ->
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["suite_id"] == "suite_demo"
+
+
+def test_cli_overrides_local_provider_api_base(monkeypatch, tmp_path: Path, capsys) -> None:
+    captured = {}
+
+    async def fake_run_registered(dataset_names, spec, **kwargs):
+        captured["spec"] = spec
+        return BenchmarkSuiteResult(
+            suite_id="suite_demo",
+            output_dir=tmp_path / "suite_demo",
+            manifest_path=tmp_path / "suite_demo" / "manifest.json",
+            score_files=(),
+            summary_files=(),
+            aggregate_summary_path=tmp_path / "suite_demo" / "suite_metrics.json",
+            total_pairs=1,
+            total_examples=1,
+            scored_examples=1,
+            failed_examples=0,
+        )
+
+    monkeypatch.setattr("benchmark_runner.cli.run_registered_benchmark_suite", fake_run_registered)
+
+    exit_code = main(
+        [
+            "--provider",
+            "local",
+            "--api-base",
+            "http://localhost:8000/v1/chat/completions",
+            "--output-root",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["spec"].provider_config.provider == Provider.LOCAL
+    assert captured["spec"].provider_config.api_base == "http://localhost:8000/v1/chat/completions"
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["suite_id"] == "suite_demo"

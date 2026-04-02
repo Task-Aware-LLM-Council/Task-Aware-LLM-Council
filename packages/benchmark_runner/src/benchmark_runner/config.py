@@ -44,6 +44,8 @@ def default_provider_config(
     if normalized_provider == Provider.LOCAL.value:
         return ProviderConfig(
             provider=Provider.LOCAL,
+            api_base=api_base,
+            api_key_env=api_key_env,
             default_model=MODEL_POOL[0],
             default_params={},
         )

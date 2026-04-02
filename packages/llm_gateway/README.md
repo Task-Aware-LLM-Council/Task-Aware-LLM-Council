@@ -14,7 +14,7 @@
 
 The current supported provider paths are:
 
-- `create_client(..., provider="local")` for in-process local inference through the vLLM Python API
+- `create_client(..., provider="local")` for an external local OpenAI-compatible server such as vLLM in Apptainer
 - `OpenAIClient` for direct OpenAI chat completions
 - `OpenRouterClient` for OpenRouter’s OpenAI-style gateway
 - `OpenAICompatibleClient` for Hugging Face router and any other OpenAI-style endpoint
@@ -30,7 +30,6 @@ from llm_gateway import OpenRouterClient, PromptRequest, ProviderConfig
 
 ### Clients
 
-- `LocalVLLMClient`
 - `OpenAIClient`
 - `OpenRouterClient`
 - `OpenAICompatibleClient`
@@ -61,7 +60,7 @@ from llm_gateway import OpenRouterClient, PromptRequest, ProviderConfig
 ## Recommended Usage
 
 - Use `OpenRouterClient` as the default path when you want one client across many hosted models.
-- Use `create_client(...)` with `provider="local"` when you are running models on your own GPU through vLLM.
+- Use `create_client(...)` with `provider="local"` when you are talking to an externally managed local server on your GPU node.
 - Use `OpenAIClient` only when you want direct OpenAI access.
 - Use `OpenAICompatibleClient` when the endpoint already speaks the OpenAI chat-completions protocol.
 - Use `create_client(...)` when the caller wants provider selection from config instead of hardcoding a class.
@@ -111,8 +110,8 @@ from llm_gateway import create_client, PromptRequest, ProviderConfig
 client = create_client(
     ProviderConfig(
         provider=Provider.LOCAL,
+        api_base="http://127.0.0.1:8000/v1/chat/completions",
         default_model="Qwen/Qwen2.5-1.5B-Instruct",
-        default_params={"dtype": "auto"},
     )
 )
 
@@ -174,12 +173,6 @@ Smoke tests additionally use:
 - `OPENAI_SMOKE_MODEL`
 - `OPENROUTER_SMOKE_MODEL`
 - `HUGGINGFACE_SMOKE_MODEL`
-- `LOCAL_VLLM_SMOKE_MODEL`
-- `LOCAL_VLLM_SMOKE_DTYPE`
-- `LOCAL_VLLM_SMOKE_TENSOR_PARALLEL_SIZE`
-- `LOCAL_VLLM_SMOKE_GPU_MEMORY_UTILIZATION`
-- `LOCAL_VLLM_SMOKE_MAX_MODEL_LEN`
-- `LOCAL_VLLM_SMOKE_TRUST_REMOTE_CODE`
 
 ## Running Tests
 
@@ -203,42 +196,61 @@ uv run pytest packages/llm_gateway/tests/test_smoke.py -m smoke -rs
 
 Smoke tests skip automatically when required environment variables are not set.
 
-Run only the local vLLM smoke test on a GPU machine:
-
-```bash
-export LOCAL_VLLM_SMOKE_MODEL=Qwen/Qwen2.5-1.5B-Instruct
-export LOCAL_VLLM_SMOKE_DTYPE=auto
-uv run --package llm-gateway --extra test pytest packages/llm_gateway/tests/test_smoke.py -m smoke -k local_vllm -rs
-```
-
 ## Local vLLM Setup
 
-Install a vLLM-capable environment and let `llm_gateway` manage the model in-process.
+Run vLLM outside Python, for example via Apptainer, and let `llm_gateway`
+connect to its OpenAI-compatible endpoint.
 
 Example local benchmark command:
 
 ```bash
-uv run benchmark-runner --preset pilot --provider local --models Qwen/Qwen2.5-1.5B-Instruct --sample-cap 2
+uv run benchmark-runner --preset pilot --provider local --api-base http://127.0.0.1:8000/v1/chat/completions --models Qwen/Qwen2.5-1.5B-Instruct --sample-cap 2
 ```
 
-That command now uses in-process local vLLM by default. Your earlier API-style
-command:
+`provider=local` now requires an explicit `api_base`.
+
+If you want your earlier command style to keep working, set the local URL in the
+benchmark config and continue running:
 
 ```bash
 uv run benchmark-runner --preset pilot
 ```
 
-will also default to `provider=local` with the current repo config.
+Use the `local` path when you want benchmark and future council code to refer to
+an external local inference instance semantically, while keeping the actual
+container start/stop lifecycle outside Python.
 
-Use `ProviderConfig.default_params` to pass local runtime settings such as `dtype`,
-`tensor_parallel_size`, or `gpu_memory_utilization` when needed.
+When `benchmark_runner` is responsible for starting Apptainer for each model,
+put these keys in `ProviderConfig.default_params`:
 
-```bash
-uv run benchmark-runner --preset pilot --provider openai-compatible --api-base http://127.0.0.1:8000/v1/chat/completions
+- `local_launch_image`
+- `local_launch_use_gpu`
+- `local_launch_bind`
+- `local_launch_container_cache_dir`
+- `local_launch_client_host`
+- `local_launch_server_host`
+- `local_launch_port`
+- `local_launch_executable`
+- `local_launch_startup_timeout_seconds`
+- `local_launch_poll_interval_seconds`
+- `local_launch_extra_args`
+- `local_launch_env`
+
+Example shape:
+
+```python
+ProviderConfig(
+    provider=Provider.LOCAL,
+    default_model="facebook/opt-125m",
+    default_params={
+        "local_launch_image": "vllm-openai_latest.sif",
+        "local_launch_use_gpu": True,
+        "local_launch_bind": "/scratch1/$USER/huggingface_cache",
+        "local_launch_port": 8000,
+        "local_launch_extra_args": ("--dtype", "auto"),
+    },
+)
 ```
-
-Use the `openai-compatible` path only when you intentionally want to talk to an
-externally managed local server such as `vllm serve`.
 
 ## Not Finished Yet
 
