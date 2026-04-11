@@ -11,7 +11,7 @@ def test_get_preset_spec_uses_expected_sample_caps(tmp_path: Path) -> None:
     pilot = get_preset_spec("pilot", output_root=tmp_path)
     full = get_preset_spec("full", output_root=tmp_path)
 
-    assert pilot.max_examples_per_dataset == 50
+    assert pilot.max_examples_per_dataset == 500
     assert full.max_examples_per_dataset == 160
     assert pilot.models == MODEL_POOL
     assert pilot.provider_config.provider == Provider.LOCAL

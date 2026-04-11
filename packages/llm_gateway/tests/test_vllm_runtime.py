@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import signal
+
 import pytest
 
-from benchmark_runner.container_runtime import (
+from llm_gateway import Provider, ProviderConfig
+from llm_gateway.vllm_runtime import (
     LOCAL_LAUNCH_BIND,
     LOCAL_LAUNCH_CLIENT_HOST,
     LOCAL_LAUNCH_CONTAINER_CACHE_DIR,
@@ -11,17 +14,14 @@ from benchmark_runner.container_runtime import (
     LOCAL_LAUNCH_IMAGE,
     LOCAL_LAUNCH_PORT,
     LOCAL_LAUNCH_USE_GPU,
-)
-from llm_gateway import Provider, ProviderConfig
-from llm_gateway.vllm_runtime import (
-    VLLMRuntime as ApptainerServerHandle,
-    VLLMRuntimeConfig as ApptainerServerConfig,
+    VLLMRuntime,
+    VLLMRuntimeConfig,
     build_vllm_runtime_config,
     normalize_local_provider_config,
 )
 
 
-def test_build_apptainer_server_config_from_provider_defaults() -> None:
+def test_build_vllm_runtime_config_from_provider_defaults() -> None:
     config = ProviderConfig(
         provider=Provider.LOCAL,
         api_base="http://unused",
@@ -69,9 +69,9 @@ def test_normalize_local_provider_config_strips_launch_keys() -> None:
     assert normalized.default_params["temperature"] == 0.0
 
 
-def test_apptainer_server_handle_builds_expected_command() -> None:
-    handle = ApptainerServerHandle(
-        ApptainerServerConfig(
+def test_vllm_runtime_builds_expected_command() -> None:
+    runtime = VLLMRuntime(
+        VLLMRuntimeConfig(
             image="vllm-openai.sif",
             bind="/scratch/cache",
             container_cache_dir="/root/.cache/huggingface",
@@ -80,7 +80,7 @@ def test_apptainer_server_handle_builds_expected_command() -> None:
         )
     )
 
-    command = handle._build_command("facebook/opt-125m")
+    command = runtime._build_command("facebook/opt-125m")
 
     assert command == (
         "apptainer",
@@ -105,7 +105,7 @@ def test_apptainer_server_handle_builds_expected_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apptainer_server_handle_start_returns_api_base(monkeypatch) -> None:
+async def test_vllm_runtime_start_returns_api_base(monkeypatch) -> None:
     events: list[object] = []
 
     class FakeProcess:
@@ -136,13 +136,43 @@ async def test_apptainer_server_handle_start_returns_api_base(monkeypatch) -> No
         fake_wait_until_ready,
     )
     monkeypatch.setattr("llm_gateway.vllm_runtime.os.getpgid", lambda pid: pid)
-    monkeypatch.setattr("llm_gateway.vllm_runtime.os.killpg", lambda pid, sig: None)
+    monkeypatch.setattr("llm_gateway.vllm_runtime.os.killpg", lambda pid, sig: events.append(("killpg", pid, sig)))
 
-    handle = ApptainerServerHandle(ApptainerServerConfig(image="vllm-openai.sif"))
+    runtime = VLLMRuntime(VLLMRuntimeConfig(image="vllm-openai.sif"))
 
-    api_base = await handle.start("facebook/opt-125m")
-    await handle.stop()
+    api_base = await runtime.start("facebook/opt-125m")
+    await runtime.stop()
 
     assert api_base == "http://127.0.0.1:8000/v1/chat/completions"
     assert events[1] == "ready"
-    assert "wait" in events
+    assert any(event == ("killpg", 123, signal.SIGTERM) for event in events)
+
+
+@pytest.mark.asyncio
+async def test_vllm_runtime_resolves_provider_config(monkeypatch) -> None:
+    runtime = VLLMRuntime(VLLMRuntimeConfig(image="vllm-openai.sif"))
+    base_config = ProviderConfig(
+        provider=Provider.LOCAL,
+        default_params={LOCAL_LAUNCH_IMAGE: "vllm-openai.sif", "temperature": 0.1},
+    )
+
+    async def fake_start(model: str) -> str:
+        assert model == "model-a"
+        return "http://127.0.0.1:8001/v1/chat/completions"
+
+    monkeypatch.setattr(runtime, "start", fake_start)
+
+    resolved = await runtime.resolved_provider_config(base_config, model="model-a")
+
+    assert resolved.api_base == "http://127.0.0.1:8001/v1/chat/completions"
+    assert resolved.default_params == {"temperature": 0.1}
+
+
+@pytest.mark.asyncio
+async def test_vllm_runtime_rejects_model_switch_without_stop() -> None:
+    runtime = VLLMRuntime(VLLMRuntimeConfig(image="vllm-openai.sif"))
+    runtime._process = object()  # type: ignore[assignment]
+    runtime._loaded_model = "model-a"
+
+    with pytest.raises(RuntimeError, match="stop it before switching"):
+        await runtime.start("model-b")

@@ -15,7 +15,7 @@ Responsibilities:
 
 Current stack:
 
-- `llm_gateway`: provider communication
+- `llm_gateway`: provider communication and shared local vLLM runtime management
 - `benchmarking_pipeline`: prompt execution and prediction persistence
 - `task_eval`: dataset profiles, normalization, extraction, and scoring
 - `benchmark_runner`: preset/config handling, suite execution, and aggregate summaries
@@ -56,7 +56,7 @@ print(result.aggregate_summary_path)
 The package now exposes a CLI:
 
 ```bash
-uv run benchmark-runner --preset pilot
+uv run benchmark-runner --preset pilot --provider vllm (other providers are not tested)
 ```
 
 Useful flags:
@@ -113,6 +113,10 @@ Current presets:
 - `full`: 160 examples per dataset
 
 Model defaults come from the baseline model pool in the package config.
+
+Local vLLM startup is now delegated to `llm_gateway`, so benchmark runner only
+passes `provider=local` plus any `local_launch_*` runtime metadata through to
+the shared runtime layer.
 
 ## Validation
 

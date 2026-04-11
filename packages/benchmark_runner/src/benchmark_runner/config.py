@@ -6,20 +6,22 @@ from llm_gateway import Provider, ProviderConfig
 from benchmark_runner.models import BenchmarkSpec, DatasetRunConfig
 
 MODEL_POOL: tuple[str, ...] = (
-    "Qwen/Qwen2.5-7B-Instruct",
-    # "openai/gpt-oss-120b",
-    # "qwen/qwen-2.5-72b-instruct",
-    # "qwen/qwen-2.5-coder-32b-instruct",
-    # "deepseek/deepseek-r1",
-    # "z-ai/glm-z1-32b",
-    # "qwen/qwq-32b",
-    # "anthropic/claude-opus-4",
-    # "minimax/minimax-m1",
-    # "qwen/qwen3-30b-a3b",
-    # "deepseek/deepseek-v3.2",
-    # "z-ai/glm-5",
-    # "moonshotai/kimi-k2.5",
-    # "google/gemini-3-pro-preview",
+    # Generalists (MuSiQue, FEVER)
+    "internlm/internlm2_5-7b-chat-1m", # Done
+    "google/gemma-2-9b-it", # Done
+    "Qwen/Qwen2.5-7B-Instruct", # Done
+    "NousResearch/Hermes-3-Llama-3.1-8B", # Done
+    # Long-Context Specialists (QuALITY)
+    "mistralai/Mistral-Nemo-Instruct-2407", # Done
+    "Qwen/Qwen2.5-14B-Instruct", # Done
+    # Math Specialists (HARDMath)
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", # Done
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", # Done
+    "01-ai/Yi-1.5-9B-Chat-16K", # Done
+    # Code Specialists (HumanEval+)
+    "Qwen/Qwen2.5-Coder-7B-Instruct", # Done
+    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct", # Done
+    "THUDM/glm-4-9b-chat" # Done
 )
 
 DATASET_CONFIGS: tuple[DatasetRunConfig, ...] = (
@@ -84,9 +86,14 @@ def get_preset_spec(preset: str, *, output_root: Path) -> BenchmarkSpec:
     if normalized == "pilot":
         return build_benchmark_spec(
             output_root=output_root,
-            max_examples_per_dataset=50,
-            max_concurrency=1, batch_size=1,
-            delay_between_requests=8)
+            max_examples_per_dataset=500,
+            # The pipeline slows down (for variable minutes during the end of the batch)
+            # Keeping 1 batch (max_examples_per_dataset / batch_size = 1) will lead to slowness only once.
+            batch_size=500, 
+            # 2. Let the asyncio.Semaphore limit it to exactly 50 active requests.
+            # As soon as 1 request finishes, the semaphore instantly pulls next request
+            max_concurrency=100,
+            delay_between_requests=0)
     if normalized == "full":
         return build_benchmark_spec(output_root=output_root, max_examples_per_dataset=160)
     raise ValueError("Unsupported preset. Expected one of: pilot, full")

@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Iterable
 import asyncio
+import time
 
 from benchmarking_pipeline import (
     BenchmarkDataset,
@@ -12,9 +13,9 @@ from benchmarking_pipeline import (
     run_benchmark,
 )
 from task_eval import DatasetProfile, get_dataset_profile
+from llm_gateway import managed_local_provider_config
 
 from benchmark_runner.metrics import Metric, NullMetric, aggregate_score_records
-from benchmark_runner.container_runtime import managed_local_provider_config
 from benchmark_runner.models import (
     AggregateMetricRow,
     BenchmarkCase,
@@ -80,8 +81,14 @@ async def run_benchmark_suite(
 
     for model in spec.models:
         async with managed_local_provider_config(spec.provider_config, model=model) as provider_config:
-            print("provider_config:", provider_config)
             for source in sources:
+                batch_size = spec.batch_size
+                max_concurrency = spec.max_concurrency
+                if source.name == "hardmath" or source.name == "humaneval_plus":
+                #     batch_size = 15
+                    max_concurrency = 60
+                print(f"Started running for model:{model} - source:{source.name} - batch_size:{batch_size} - max_concurrency:{max_concurrency}")
+                start_time = time.perf_counter()  # START TIMER
                 dataset_metadata = dict(getattr(source, "metadata", {}))
                 metric = metric_resolver(source)
                 pair_score_path = score_path(suite_dir, source.name, model)
@@ -95,10 +102,11 @@ async def run_benchmark_suite(
                 for batch in (
                     chunk_cases(
                         source,
-                        batch_size=max(spec.batch_size, 1),
+                        batch_size=max(batch_size, 1),
                         max_cases=spec.max_examples_per_dataset,
                     )
-                ):
+                ):  
+                    print(f"running batch-{iterations}")
                     await asyncio.sleep(spec.delay_between_requests)
                     batch_examples = tuple(case.example for case in batch)
                     case_lookup = {case.example.example_id: case for case in batch}
@@ -111,7 +119,7 @@ async def run_benchmark_suite(
                         output_root=suite_dir / "predictions",
                         run_name=pair_name,
                         prompt_version=spec.prompt_version,
-                        max_concurrency=spec.max_concurrency,
+                        max_concurrency=max_concurrency,
                         continue_on_error=spec.continue_on_error,
                         skip_existing=spec.skip_existing_predictions,
                         save_raw_response=spec.save_raw_response,
@@ -121,18 +129,23 @@ async def run_benchmark_suite(
                         provider_params=dict(spec.provider_params),
                     )
 
+                    print(f"Running pipeline - {iterations}")
                     result = await pipeline_runner(
                         (BenchmarkDataset(name=source.name, examples=batch_examples),),
                         pipeline_config,
                     )
+                    print(f"Pipeline done - {iterations}")
 
+                    print(f"loading predictions - {iterations}")
                     batch_prediction_records = _load_batch_predictions(
                         result,
                         dataset_name=source.name,
                         model=model,
                         example_ids=set(case_lookup),
                     )
+                    print(f"predictions loaded - {iterations}")
 
+                    print(f"scoring predictions - {iterations}")
                     for prediction in batch_prediction_records:
                         record = _score_prediction(
                             suite_id=suite_id,
@@ -149,9 +162,19 @@ async def run_benchmark_suite(
                             scored_examples += 1
                         else:
                             failed_examples += 1
+                    
+                    print(f"predictions scored - {iterations}")
+
+                    print(f"batch done -{iterations}")
 
                     iterations += 1
-
+                    print(f"iterations - {iterations}")
+                    if iterations%10==0:
+                        print(f"model:{model} - source:{source.name} iterations:{iterations} done")
+                    
+                end_time = time.perf_counter()    # END TIMER
+                elapsed = end_time - start_time
+                print(f"Finished running for model:{model} - source:{source.name} in {elapsed:.2f} seconds")
                 total_pairs += 1
                 summary = _build_summary(
                     suite_id=suite_id,
@@ -176,6 +199,8 @@ async def run_benchmark_suite(
                         summary_path=pair_summary_path,
                     )
                 )
+
+                print(f"Done running for model:{model} - source:{source.name}")
 
     aggregate_path = aggregate_summary_path(suite_dir)
     write_aggregate_summary(aggregate_path, aggregate_rows)

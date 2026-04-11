@@ -25,6 +25,11 @@ def test_public_api_exports_documented_symbols() -> None:
         "RetryPolicy",
         "ResponseChoice",
         "Usage",
+        "VLLMRuntime",
+        "VLLMRuntimeConfig",
+        "build_vllm_runtime_config",
+        "managed_local_provider_config",
+        "normalize_local_provider_config",
     }
 
     for name in exported_names:

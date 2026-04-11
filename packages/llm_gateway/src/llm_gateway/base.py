@@ -57,7 +57,7 @@ class HTTPErrorPolicy:
 class ClientInfo:
     provider: str
     default_model: str | None = None
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 900.0
     max_retries: int = 3
     api_base: str | None = None
 

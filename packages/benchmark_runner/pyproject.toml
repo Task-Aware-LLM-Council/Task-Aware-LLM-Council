@@ -9,8 +9,10 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "benchmarking-pipeline",
+    "llm-gateway",
     "task-eval",
     "datasets>=4.8.3",
+    "common",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +31,7 @@ asyncio_mode = "auto"
 benchmarking-pipeline = { workspace = true }
 llm-gateway = { workspace = true }
 task-eval = { workspace = true }
+common = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]

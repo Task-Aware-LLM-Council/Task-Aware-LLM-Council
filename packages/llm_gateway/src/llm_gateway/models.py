@@ -107,7 +107,7 @@ class ProviderConfig:
     api_base: str | None = None
     api_key_env: str | None = None
     default_model: str | None = None
-    timeout_seconds: float = 60.0
+    timeout_seconds: float = 900.0
     max_retries: int = 3
     headers: dict[str, str] = field(default_factory=dict)
     default_params: dict[str, Any] = field(default_factory=dict)

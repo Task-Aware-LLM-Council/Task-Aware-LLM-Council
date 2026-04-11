@@ -6,11 +6,22 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from llm_gateway import Provider
+from llm_gateway import (
+    LOCAL_LAUNCH_BIND,
+    LOCAL_LAUNCH_DTYPE,
+    LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION,
+    LOCAL_LAUNCH_IMAGE,
+    LOCAL_LAUNCH_LOAD_FORMAT,
+    LOCAL_LAUNCH_MAX_MODEL_LEN,
+    LOCAL_LAUNCH_QUANTIZATION,
+    LOCAL_LAUNCH_STARTUP_TIMEOUT,
+    Provider,
+)
 
 from benchmark_runner.config import default_provider_config, get_dataset_configs, get_preset_spec
 from benchmark_runner.suite import run_registered_benchmark_suite
-from benchmark_runner.container_runtime import LOCAL_LAUNCH_IMAGE, LOCAL_LAUNCH_BIND
+
+from common import get_current_user
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", default="pilot", choices=("pilot", "full"))
     parser.add_argument(
         "--output-root",
-        default="results/benchmark_suite",
+        default=f"/scratch1/{get_current_user()}/results/benchmark_suite",
         help="Directory that will contain the suite output directory.",
     )
     parser.add_argument(
@@ -66,7 +77,14 @@ async def run_cli_async(args: argparse.Namespace) -> int:
         if provider == "vllm":
             provider = Provider.LOCAL
             new_params[LOCAL_LAUNCH_IMAGE] = "vllm-openai_latest.sif"
-            new_params[LOCAL_LAUNCH_BIND] = "/scratch1/bmahajan/.cache"
+            new_params[LOCAL_LAUNCH_BIND] = f"/scratch1/{get_current_user()}/.cache"
+            new_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] = 600
+
+            # new_params[LOCAL_LAUNCH_QUANTIZATION] = 'bitsandbytes'
+            # new_params[LOCAL_LAUNCH_LOAD_FORMAT] = 'bitsandbytes'
+            # new_params[LOCAL_LAUNCH_DTYPE] = 'bfloat16'
+            new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = '8192'
+            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = .95
         
         base_provider_config = default_provider_config(
             provider=provider,

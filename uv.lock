@@ -161,7 +161,9 @@ version = "0.1.0"
 source = { editable = "packages/benchmark_runner" }
 dependencies = [
     { name = "benchmarking-pipeline" },
+    { name = "common" },
     { name = "datasets" },
+    { name = "llm-gateway" },
     { name = "task-eval" },
 ]
 
@@ -174,7 +176,9 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "benchmarking-pipeline", editable = "packages/benchmarking_pipeline" },
+    { name = "common", editable = "packages/common" },
     { name = "datasets", specifier = ">=4.8.3" },
+    { name = "llm-gateway", editable = "packages/llm_gateway" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24" },
     { name = "task-eval", editable = "packages/task_eval" },
@@ -573,6 +577,7 @@ name = "llm-gateway"
 version = "0.1.0"
 source = { editable = "packages/llm_gateway" }
 dependencies = [
+    { name = "common" },
     { name = "httpx" },
     { name = "python-dotenv" },
 ]
@@ -587,6 +592,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "common", editable = "packages/common" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24" },

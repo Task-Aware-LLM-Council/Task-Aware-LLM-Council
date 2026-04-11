@@ -119,6 +119,24 @@ def _docker_available() -> bool:
     except Exception:
         return False
 
+
+def _apptainer_available() -> bool:
+    """Check if Apptainer binary exists."""
+    if shutil.which("apptainer") is None:
+        return False
+
+    try:
+        subprocess.run(
+            ["apptainer", "version"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+            check=True,
+        )
+        return True
+    except Exception:
+        return False
+
 def pass_at_1(
     prediction: str,
     *,
@@ -129,9 +147,12 @@ def pass_at_1(
     if not prediction.strip():
         return 0.0
 
-    if not _docker_available():
-        print("Docker not available or not running")
+    if not _apptainer_available():
+        print("Apptainer not available")
         return 0.0
+    # if not _docker_available():
+    #     print("Docker not available or not running")
+    #     return 0.0
 
     standard_imports = (
         "import math\n"
@@ -161,29 +182,51 @@ if __name__ == "__main__":
         os.chmod(temp_dir, 0o755)
         os.chmod(file_path, 0o644)
 
-        docker_cmd = [
-            "docker", "run",
-            "--rm",
-            "--network", "none",
-            "--memory", "256m",
-            "--cpus", "1.0",
-            "--pids-limit", "64",
-            "--read-only",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
-            "--security-opt", "no-new-privileges",
-            "--cap-drop", "ALL",
-            "-v", f"{temp_dir}:/code:ro",
-            "-w", "/code",
-            "python:3.10-slim",
-            "python3", "/code/script.py",
+        # docker_cmd = [
+        #     "docker", "run",
+        #     "--rm",
+        #     "--network", "none",
+        #     "--memory", "256m",
+        #     "--cpus", "1.0",
+        #     "--pids-limit", "64",
+        #     "--read-only",
+        #     "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+        #     "--security-opt", "no-new-privileges",
+        #     "--cap-drop", "ALL",
+        #     "-v", f"{temp_dir}:/code:ro",
+        #     "-w", "/code",
+        #     "python:3.10-slim",
+        #     "python3", "/code/script.py",
+        # ]
+
+        # Build Apptainer sandboxed command
+        apptainer_cmd = [
+            "apptainer", "exec",
+            "--containall",          # Isolates PID, IPC, and creates a clean, ephemeral /tmp
+            "--net",                 # Enables network namespace isolation
+            "--network=none",        # Explicitly disables networking
+            "--cleanenv",            # Prevents host environment variables from leaking
+            "--bind", f"{temp_dir}:/code:ro",
+            "--pwd", "/code",
+            "python_3.10-slim.sif",  # Apptainer automatically pulls and caches from Docker Hub
+            "python3", "script.py",
         ]
 
         try:
+            # result = subprocess.run(
+            #     docker_cmd,
+            #     capture_output=True,
+            #     text=True,
+            #     timeout=timeout_seconds + 2,  # buffer for Docker startup
+            # )
+            # # Success = exit code 0
+            # return float(result.returncode == 0)
+
             result = subprocess.run(
-                docker_cmd,
+                apptainer_cmd,
                 capture_output=True,
                 text=True,
-                timeout=timeout_seconds + 2,  # buffer for Docker startup
+                timeout=timeout_seconds + 15,  # Slightly higher buffer for Apptainer startup
             )
             # Success = exit code 0
             return float(result.returncode == 0)
