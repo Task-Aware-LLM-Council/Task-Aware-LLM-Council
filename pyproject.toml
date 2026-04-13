@@ -18,4 +18,5 @@ members = [
     "packages/benchmarking_pipeline",
     "packages/benchmark_runner",
     "packages/task_eval",
+    "packages/model-quantization",
 ]
