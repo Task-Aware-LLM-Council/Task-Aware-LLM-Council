@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Iterable
 import asyncio
+import time
 
 from benchmarking_pipeline import (
     BenchmarkDataset,
@@ -12,6 +13,7 @@ from benchmarking_pipeline import (
     run_benchmark,
 )
 from task_eval import DatasetProfile, get_dataset_profile
+from llm_gateway import managed_local_provider_config
 
 from benchmark_runner.metrics import Metric, NullMetric, aggregate_score_records
 from benchmark_runner.models import (
@@ -77,106 +79,127 @@ async def run_benchmark_suite(
     scored_examples = 0
     failed_examples = 0
 
-    for source in sources:
-        dataset_metadata = dict(getattr(source, "metadata", {}))
-        metric = metric_resolver(source)
+    for model in spec.models:
+        async with managed_local_provider_config(spec.provider_config, model=model) as provider_config:
+            for source in sources:
+                batch_size = spec.batch_size
+                max_concurrency = spec.max_concurrency
+                if source.name == "hardmath" or source.name == "humaneval_plus":
+                #     batch_size = 15
+                    max_concurrency = 60
+                print(f"Started running for model:{model} - source:{source.name} - batch_size:{batch_size} - max_concurrency:{max_concurrency}")
+                start_time = time.perf_counter()  # START TIMER
+                dataset_metadata = dict(getattr(source, "metadata", {}))
+                metric = metric_resolver(source)
+                pair_score_path = score_path(suite_dir, source.name, model)
+                pair_summary_path = summary_path(suite_dir, source.name, model)
+                score_files.add(pair_score_path)
+                summary_files.add(pair_summary_path)
 
-        for model in spec.models:
-            total_pairs += 1
-            pair_score_path = score_path(suite_dir, source.name, model)
-            pair_summary_path = summary_path(suite_dir, source.name, model)
-            score_files.add(pair_score_path)
-            summary_files.add(pair_summary_path)
+                pair_records: list[dict[str, object]] = []
 
-            pair_records: list[dict[str, object]] = []
+                iterations = 0
+                for batch in (
+                    chunk_cases(
+                        source,
+                        batch_size=max(batch_size, 1),
+                        max_cases=spec.max_examples_per_dataset,
+                    )
+                ):  
+                    print(f"running batch-{iterations}")
+                    await asyncio.sleep(spec.delay_between_requests)
+                    batch_examples = tuple(case.example for case in batch)
+                    case_lookup = {case.example.example_id: case for case in batch}
+                    total_examples += len(batch_examples)
 
-            iterations = 0
-            for batch in (
-                chunk_cases(
-                    source,
-                    batch_size=max(spec.batch_size, 1),
-                    max_cases=spec.max_examples_per_dataset,
-                )
-            ):
-                await asyncio.sleep(spec.delay_between_requests)
-                print(f"Batch - {len(batch)}")
-                batch_examples = tuple(case.example for case in batch)
-                case_lookup = {case.example.example_id: case for case in batch}
-                total_examples += len(batch_examples)
+                    pair_name = pair_run_name(source.name, model)
+                    pipeline_config = BenchmarkRunConfig(
+                        provider_config=provider_config,
+                        models=(model,),
+                        output_root=suite_dir / "predictions",
+                        run_name=pair_name,
+                        prompt_version=spec.prompt_version,
+                        max_concurrency=max_concurrency,
+                        continue_on_error=spec.continue_on_error,
+                        skip_existing=spec.skip_existing_predictions,
+                        save_raw_response=spec.save_raw_response,
+                        temperature=spec.temperature,
+                        max_tokens=spec.max_tokens,
+                        stop_sequences=spec.stop_sequences,
+                        provider_params=dict(spec.provider_params),
+                    )
 
-                pair_name = pair_run_name(source.name, model)
-                pipeline_config = BenchmarkRunConfig(
-                    provider_config=spec.provider_config,
-                    models=(model,),
-                    output_root=suite_dir / "predictions",
-                    run_name=pair_name,
-                    prompt_version=spec.prompt_version,
-                    max_concurrency=spec.max_concurrency,
-                    continue_on_error=spec.continue_on_error,
-                    skip_existing=spec.skip_existing_predictions,
-                    save_raw_response=spec.save_raw_response,
-                    temperature=spec.temperature,
-                    max_tokens=spec.max_tokens,
-                    stop_sequences=spec.stop_sequences,
-                    provider_params=dict(spec.provider_params),
-                )
+                    print(f"Running pipeline - {iterations}")
+                    result = await pipeline_runner(
+                        (BenchmarkDataset(name=source.name, examples=batch_examples),),
+                        pipeline_config,
+                    )
+                    print(f"Pipeline done - {iterations}")
 
-                result = await pipeline_runner(
-                    (BenchmarkDataset(name=source.name, examples=batch_examples),),
-                    pipeline_config,
-                )
-
-                batch_prediction_records = _load_batch_predictions(
-                    result,
-                    dataset_name=source.name,
-                    model=model,
-                    example_ids=set(case_lookup),
-                )
-
-                for prediction in batch_prediction_records:
-                    record = _score_prediction(
-                        suite_id=suite_id,
+                    print(f"loading predictions - {iterations}")
+                    batch_prediction_records = _load_batch_predictions(
+                        result,
                         dataset_name=source.name,
                         model=model,
-                        metric=metric,
-                        case_lookup=case_lookup,
-                        dataset_metadata=dataset_metadata,
-                        prediction=prediction,
+                        example_ids=set(case_lookup),
                     )
-                    append_score_record(pair_score_path, record)
-                    pair_records.append(asdict(record))
-                    if record.status == "scored":
-                        scored_examples += 1
-                    else:
-                        failed_examples += 1
+                    print(f"predictions loaded - {iterations}")
 
-                iterations += 1
-                if iterations % 10 == 0:
-                    print(f"iterations:{iterations} done for pair:{pair_name}")
+                    print(f"scoring predictions - {iterations}")
+                    for prediction in batch_prediction_records:
+                        record = _score_prediction(
+                            suite_id=suite_id,
+                            dataset_name=source.name,
+                            model=model,
+                            metric=metric,
+                            case_lookup=case_lookup,
+                            dataset_metadata=dataset_metadata,
+                            prediction=prediction,
+                        )
+                        append_score_record(pair_score_path, record)
+                        pair_records.append(asdict(record))
+                        if record.status == "scored":
+                            scored_examples += 1
+                        else:
+                            failed_examples += 1
+                    
+                    print(f"predictions scored - {iterations}")
 
-            summary = _build_summary(
-                suite_id=suite_id,
-                dataset_name=source.name,
-                model=model,
-                metric_name=_metric_name(metric, source),
-                records=pair_records,
-            )
-            write_summary(pair_summary_path, summary)
-            aggregate_rows.append(
-                AggregateMetricRow(
+                    print(f"batch done -{iterations}")
+
+                    iterations += 1
+                    if iterations%10==0:
+                        print(f"model:{model} - source:{source.name} iterations:{iterations} done")
+                    
+                end_time = time.perf_counter()    # END TIMER
+                elapsed = end_time - start_time
+                print(f"Finished running for model:{model} - source:{source.name} in {elapsed:.2f} seconds")
+                total_pairs += 1
+                summary = _build_summary(
                     suite_id=suite_id,
-                    dataset_name=summary.dataset_name,
-                    model=summary.model,
-                    primary_metric=summary.metric_name,
-                    primary_metric_value=summary.aggregated_metrics.get(
-                        summary.metric_name),
-                    aggregated_metrics=dict(summary.aggregated_metrics),
-                    scored_examples=summary.scored_examples,
-                    failed_examples=summary.failed_examples,
-                    total_examples=summary.total_examples,
-                    summary_path=pair_summary_path,
+                    dataset_name=source.name,
+                    model=model,
+                    metric_name=_metric_name(metric, source),
+                    records=pair_records,
                 )
-            )
+                write_summary(pair_summary_path, summary)
+                aggregate_rows.append(
+                    AggregateMetricRow(
+                        suite_id=suite_id,
+                        dataset_name=summary.dataset_name,
+                        model=summary.model,
+                        primary_metric=summary.metric_name,
+                        primary_metric_value=summary.aggregated_metrics.get(
+                            summary.metric_name),
+                        aggregated_metrics=dict(summary.aggregated_metrics),
+                        scored_examples=summary.scored_examples,
+                        failed_examples=summary.failed_examples,
+                        total_examples=summary.total_examples,
+                        summary_path=pair_summary_path,
+                    )
+                )
+
+                print(f"Done running for model:{model} - source:{source.name}")
 
     aggregate_path = aggregate_summary_path(suite_dir)
     write_aggregate_summary(aggregate_path, aggregate_rows)
@@ -221,7 +244,6 @@ def _load_batch_predictions(
     model: str,
     example_ids: set[str],
 ) -> list[dict[str, object]]:
-    print(f"result - {len(result.prediction_files)}")
     records: list[dict[str, object]] = []
 
     for path in result.prediction_files:

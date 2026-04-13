@@ -52,6 +52,41 @@ def extract_qa_answer(response: str) -> str:
     return response.splitlines()[0].strip()
 
 
+def extract_qa_answer_musique(response: str) -> str:
+    response = (response or "").strip()
+    if not response:
+        return ""
+
+    match = re.search(
+        r"(?:the answer is|answer:|final answer:)\s*(.+?)(?:\n|$)",
+        response,
+        re.IGNORECASE,
+    )
+    if match:
+        ans = match.group(1).strip()
+        # Strip out trailing XML tags if the model forgets to put them on a new line
+        return re.sub(r"</?scratchpad>", "", ans, flags=re.IGNORECASE).strip()
+
+    preamble = (
+        "let me",
+        "based on",
+        "according to",
+        "looking at",
+        "from the",
+        "to answer",
+        "the passage",
+        "in the",
+        "first,",
+        "step",
+    )
+    for line in response.splitlines():
+        candidate = line.strip()
+        if candidate and not candidate.lower().startswith(preamble):
+            return candidate.rstrip(".") if len(candidate.split()) <= 10 else candidate
+
+    return response.splitlines()[0].strip()
+
+
 def extract_mcq_answer(response: str) -> str:
     response = (response or "").strip()
     if not response:

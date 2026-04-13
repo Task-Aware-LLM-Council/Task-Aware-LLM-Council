@@ -238,6 +238,32 @@ Current observed issue from the first real run:
 That means the immediate runtime blocker is provider auth/config, not the
 pipeline code.
 
+## Latest Architectural Decision
+
+To avoid hosted API rate limits during first-submission benchmarking, local GPU
+inference is now routed through
+[packages/llm_gateway](/home/mbhas/USC/Sem-2/NLP/Task-Aware-LLM-Council/packages/llm_gateway)
+instead of introducing a separate package boundary for execution.
+
+Decision details:
+
+- local inference is treated as a first-class `llm_gateway` provider
+- the active local runtime target is an external OpenAI-compatible vLLM server
+  managed outside Python, typically via Apptainer on CARC
+- `benchmark_runner` can now optionally start and stop Apptainer-backed local
+  servers per model using config-driven launch parameters
+- `llm_gateway` only consumes the endpoint URL and does not manage the container
+  lifecycle itself
+- short-lived local clients fit one-server-per-port execution and future
+  multi-instance council orchestration
+- this preserves one inference surface for:
+  - single-model benchmarking now
+  - council inference later
+
+This keeps `benchmarking_pipeline` and `benchmark_runner` unchanged at the
+request/response contract level while moving container/runtime lifecycle
+management outside `llm_gateway`.
+
 ### 2. Final model pool and dataset selection
 
 The currently active benchmark config was temporarily narrowed to one model and

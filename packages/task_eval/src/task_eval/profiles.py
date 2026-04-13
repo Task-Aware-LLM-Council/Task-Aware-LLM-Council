@@ -13,7 +13,8 @@ from task_eval.extraction import (
     extract_fever_label,
     extract_math_answer,
     extract_mcq_answer,
-    extract_qa_answer
+    extract_qa_answer,
+    extract_qa_answer_musique
 )
 from task_eval.interfaces import DatasetProfile
 from task_eval.models import EvaluationCase, MetricResult, PredictionRecord
@@ -88,53 +89,82 @@ class MusiqueProfile(BaseDatasetProfile):
     metric_names: tuple[str, ...] = ("exact_match", "token_f1")
     primary_metric: str = "token_f1"
     dataset_name: str = "bdsaglam/musique"
+    NOT_PRESENT_IN_CONTEXT = "NOT PRESENT IN CONTEXT" 
 
     def row_to_case(self, row: dict[str, Any], index: int) -> EvaluationCase:
         question = str(_first_present(row, "question",
                        "query", "prompt", default=""))
         raw_context = _first_present(row, "paragraphs", "context")
-        context_str = ""
 
-        if isinstance(raw_context, str):
-            context_str = raw_context
-        elif isinstance(raw_context, list):
+        # Extract ONLY the supporting paragraphs (Oracle Context)
+        best_paragraphs = []
+        
+        if isinstance(raw_context, list):
             for item in raw_context:
                 if isinstance(item, dict):
-                    # Datasets vary slightly; try both 'paragraph_text' and 'text'
-                    text_chunk = item.get(
-                        "paragraph_text", item.get("text", ""))
-                    context_str += f"{text_chunk}\n\n"
-                elif isinstance(item, str):
-                    context_str += f"{item}\n\n"
+                    # Musique flags the gold paragraphs needed for the hops!
+                    if item.get("is_supporting") is True:
+                        text_chunk = item.get("paragraph_text", item.get("text", ""))
+                        if text_chunk.strip(): 
+                            best_paragraphs.append(text_chunk.strip())
+            
+            # Fallback just in case a split doesn't have the flag
+            if not best_paragraphs:
+                for item in raw_context[:4]: # Just grab the first 4
+                    if isinstance(item, dict):
+                        text_chunk = item.get("paragraph_text", item.get("text", ""))
+                        if text_chunk.strip(): best_paragraphs.append(text_chunk.strip())
 
-        context_str = context_str.strip()
+        elif isinstance(raw_context, str):
+            best_paragraphs = [p.strip() for p in raw_context.split('\n\n') if p.strip()][:4]
+
+        # 3Assemble the Shrunk Oracle Context
+        context_str = "\n\n".join(best_paragraphs)
 
         answers = _as_list(_first_present(
             row, "answers", "answer", "gold_answers"))
         example_id = str(_first_present(
             row, "id", "example_id", default=index))
-        constrained_question = question + \
-            "\n\nAnswer the question concisely with just the exact entity name."
+        
+        # The Strict Chain-of-Thought Prompt
+        constrained_question = (
+            "You are a strict reading comprehension assistant. You must analyze the context and think step-by-step out loud before answering.\n\n"
+            "RULES:\n"
+            "1. You must ONLY use the information provided in the Context. Do NOT use general knowledge.\n"
+            "2. The answer is ALWAYS hidden somewhere in the text. You must search carefully.\n\n"
+            f"Context:\n{context_str}\n\n"
+            f"Question: {question}\n\n"
+            "Write your step-by-step reasoning inside <scratchpad> tags. "
+            "After you are done thinking, conclude your response on a new line with the exact format: 'Final Answer: <exact entity name>'. "
+            f"If the answer is completely missing, output 'Final Answer: {self.NOT_PRESENT_IN_CONTEXT}'."
+        )
 
         return EvaluationCase(
             example=BenchmarkExample(
                 example_id=example_id,
                 dataset_name=self.name,
                 question=constrained_question,
-                context=context_str if context_str else None,
                 metadata={"profile": self.name},
             ),
             reference={"answers": [str(answer) for answer in answers]},
-            metadata={"raw_row": row},
+            metadata={"raw_row": row, "answerable": bool(row.get("answerable", False))},
         )
 
     def score(self, *, case: EvaluationCase, prediction: PredictionRecord, dataset_metadata=None) -> MetricResult:
-        extracted = extract_qa_answer(self._prediction_text(prediction))
+        answerable = bool(case.metadata.get("answerable"))
+        extracted = extract_qa_answer_musique(self._prediction_text(prediction))
         answers = [str(answer) for answer in case.reference.get("answers", [])]
+        false_negative = 0
+        if not answerable:
+            answers = [self.NOT_PRESENT_IN_CONTEXT]
+        elif extracted == self.NOT_PRESENT_IN_CONTEXT:
+            false_negative = 1
         return MetricResult(
             values={
                 "exact_match": exact_match_multi(extracted, answers),
                 "token_f1": token_f1_multi(extracted, answers),
+                "false_negative": false_negative,
+                "answerable" : answerable
             },
             metadata={"extracted_answer": extracted},
         )

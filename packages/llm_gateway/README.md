@@ -8,12 +8,14 @@
 - Shared retry, backoff, and rate-limit handling in the base client layer
 - Thin provider wrappers for direct OpenAI and OpenRouter
 - Generic OpenAI-compatible transport for any OpenAI-style endpoint
+- Shared vLLM runtime management for local Apptainer-backed inference
 - Config-driven client construction through `create_client(...)`
 - Unit compatibility tests for the current public surface
 - Smoke-test hooks for OpenAI, OpenRouter, and Hugging Face router
 
 The current supported provider paths are:
 
+- `create_client(..., provider="local")` for a local OpenAI-compatible server such as vLLM
 - `OpenAIClient` for direct OpenAI chat completions
 - `OpenRouterClient` for OpenRouter’s OpenAI-style gateway
 - `OpenAICompatibleClient` for Hugging Face router and any other OpenAI-style endpoint
@@ -33,10 +35,13 @@ from llm_gateway import OpenRouterClient, PromptRequest, ProviderConfig
 - `OpenRouterClient`
 - `OpenAICompatibleClient`
 - `BaseLLMClient`
+- `VLLMRuntime`
 
 ### Factory
 
 - `create_client`
+- `build_vllm_runtime_config`
+- `managed_local_provider_config`
 
 ### Request / Response Types
 
@@ -59,6 +64,8 @@ from llm_gateway import OpenRouterClient, PromptRequest, ProviderConfig
 ## Recommended Usage
 
 - Use `OpenRouterClient` as the default path when you want one client across many hosted models.
+- Use `create_client(...)` with `provider="local"` when you are talking to a local OpenAI-compatible server, including vLLM.
+- Use `VLLMRuntime` when Python should own the lifecycle of a local vLLM instance and hand the resolved endpoint to `create_client(...)` or other callers.
 - Use `OpenAIClient` only when you want direct OpenAI access.
 - Use `OpenAICompatibleClient` when the endpoint already speaks the OpenAI chat-completions protocol.
 - Use `create_client(...)` when the caller wants provider selection from config instead of hardcoding a class.
@@ -98,6 +105,27 @@ client = OpenAIClient(
 )
 
 response = await client.generate(PromptRequest(user_prompt="Say hello."))
+print(response.text)
+await client.close()
+```
+
+```python
+from llm_gateway import create_client, PromptRequest, ProviderConfig
+
+client = create_client(
+    ProviderConfig(
+        provider=Provider.LOCAL,
+        api_base="http://127.0.0.1:8000/v1/chat/completions",
+        default_model="Qwen/Qwen2.5-1.5B-Instruct",
+    )
+)
+
+response = await client.generate(
+    PromptRequest(
+        user_prompt="Say hello from the local GPU runtime.",
+    )
+)
+
 print(response.text)
 await client.close()
 ```
@@ -172,6 +200,87 @@ uv run pytest packages/llm_gateway/tests/test_smoke.py -m smoke -rs
 ```
 
 Smoke tests skip automatically when required environment variables are not set.
+
+## Local vLLM Setup
+
+`llm_gateway` supports both ways of using vLLM:
+
+- connect to an already-running local OpenAI-compatible endpoint via `provider=local`
+- start and stop an Apptainer-backed vLLM instance via `VLLMRuntime`
+
+Example local benchmark command:
+
+```bash
+uv run benchmark-runner --preset pilot --provider local --api-base http://127.0.0.1:8000/v1/chat/completions --models Qwen/Qwen2.5-1.5B-Instruct --sample-cap 2
+```
+
+`provider=local` now requires an explicit `api_base`.
+
+If you want your earlier command style to keep working, set the local URL in the
+benchmark config and continue running:
+
+```bash
+uv run benchmark-runner --preset pilot
+```
+
+Use the `local` path when you want benchmark and orchestration code to refer to
+a local inference instance semantically. If you include `local_launch_*` keys,
+`managed_local_provider_config(...)` and `VLLMRuntime` can own the container
+lifecycle in Python.
+
+When `benchmark_runner` is responsible for starting Apptainer for each model,
+put these keys in `ProviderConfig.default_params`:
+
+- `local_launch_image`
+- `local_launch_use_gpu`
+- `local_launch_bind`
+- `local_launch_container_cache_dir`
+- `local_launch_client_host`
+- `local_launch_server_host`
+- `local_launch_port`
+- `local_launch_executable`
+- `local_launch_startup_timeout_seconds`
+- `local_launch_poll_interval_seconds`
+- `local_launch_extra_args`
+- `local_launch_env`
+
+Example shape:
+
+```python
+ProviderConfig(
+    provider=Provider.LOCAL,
+    default_model="facebook/opt-125m",
+    default_params={
+        "local_launch_image": "vllm-openai_latest.sif",
+        "local_launch_use_gpu": True,
+        "local_launch_bind": "/scratch1/$USER/huggingface_cache",
+        "local_launch_port": 8000,
+        "local_launch_extra_args": ("--dtype", "auto"),
+    },
+)
+```
+
+Example orchestration/runtime usage:
+
+```python
+from llm_gateway import (
+    LOCAL_LAUNCH_IMAGE,
+    Provider,
+    ProviderConfig,
+    VLLMRuntime,
+    build_vllm_runtime_config,
+)
+
+base_config = ProviderConfig(
+    provider=Provider.LOCAL,
+    default_model="Qwen/Qwen2.5-7B-Instruct",
+    default_params={LOCAL_LAUNCH_IMAGE: "vllm-openai_latest.sif"},
+)
+
+runtime_config = build_vllm_runtime_config(base_config)
+runtime = VLLMRuntime(runtime_config)
+provider_config = await runtime.resolved_provider_config(base_config, model="Qwen/Qwen2.5-7B-Instruct")
+```
 
 ## Not Finished Yet
 

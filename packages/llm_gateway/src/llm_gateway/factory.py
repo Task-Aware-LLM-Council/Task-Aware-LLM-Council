@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from llm_gateway.base import BaseLLMClient, HTTPErrorPolicy, LLMClientError
+from llm_gateway.base import BaseLLMClient, HTTPErrorPolicy, LLMClientError, LLMRequestError
 from llm_gateway.models import Provider, ProviderConfig, RetryPolicy
 from llm_gateway.providers.openai import OpenAIClient
 from llm_gateway.providers.openai_compatible import OpenAICompatibleClient
@@ -31,6 +31,25 @@ def create_client(
 
     if provider == Provider.OPENAI_COMPATIBLE.value:
         return OpenAICompatibleClient(config, retry_policy=retry_policy)
+
+    if provider in {Provider.LOCAL.value, "vllm"}:
+        if not config.api_base:
+            raise LLMRequestError("local provider requires api_base")
+        normalized_config = ProviderConfig(
+            provider=Provider.LOCAL,
+            api_base=config.api_base,
+            api_key_env=config.api_key_env,
+            default_model=config.default_model,
+            timeout_seconds=config.timeout_seconds,
+            max_retries=config.max_retries,
+            headers=dict(config.headers),
+            default_params={
+                key: value
+                for key, value in config.default_params.items()
+                if not str(key).startswith("local_launch_")
+            },
+        )
+        return OpenAICompatibleClient(normalized_config, retry_policy=retry_policy)
 
     if provider in {Provider.HUGGINGFACE.value, "hf"}:
         normalized_config = ProviderConfig(

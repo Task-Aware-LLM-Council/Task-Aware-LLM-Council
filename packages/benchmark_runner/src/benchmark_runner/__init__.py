@@ -25,6 +25,11 @@ from benchmark_runner.models import (
 )
 from benchmark_runner.sources import DatasetSource, HuggingFaceDatasetSource, IterableDatasetSource
 from benchmark_runner.suite import run_benchmark_suite, run_registered_benchmark_suite
+from llm_gateway import (
+    VLLMRuntime as ApptainerServerHandle,
+    VLLMRuntimeConfig as ApptainerServerConfig,
+    managed_local_provider_config,
+)
 
 __all__ = [
     "BenchmarkCase",
@@ -38,6 +43,9 @@ __all__ = [
     "default_provider_config",
     "get_dataset_configs",
     "get_preset_spec",
+    "ApptainerServerConfig",
+    "ApptainerServerHandle",
+    "managed_local_provider_config",
     "DatasetSource",
     "HuggingFaceDatasetSource",
     "IterableDatasetSource",

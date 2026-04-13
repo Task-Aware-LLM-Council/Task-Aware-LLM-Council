@@ -6,8 +6,9 @@ readme = "README.md"
 authors = [
     { name = "Bhaskar Mahajan", email = "bhaskarmahajan98@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
+    "common",
     "httpx>=0.27",
     "python-dotenv>=1.2.2",
 ]
@@ -29,6 +30,9 @@ markers = [
     "unit: fast mocked tests for client behavior",
     "smoke: live provider smoke tests that require API credentials",
 ]
+
+[tool.uv.sources]
+common = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]

@@ -6,8 +6,22 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from benchmark_runner.config import get_dataset_configs, get_preset_spec
+from llm_gateway import (
+    LOCAL_LAUNCH_BIND,
+    LOCAL_LAUNCH_DTYPE,
+    LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION,
+    LOCAL_LAUNCH_IMAGE,
+    LOCAL_LAUNCH_LOAD_FORMAT,
+    LOCAL_LAUNCH_MAX_MODEL_LEN,
+    LOCAL_LAUNCH_QUANTIZATION,
+    LOCAL_LAUNCH_STARTUP_TIMEOUT,
+    Provider,
+)
+
+from benchmark_runner.config import default_provider_config, get_dataset_configs, get_preset_spec
 from benchmark_runner.suite import run_registered_benchmark_suite
+
+from common import get_current_user
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", default="pilot", choices=("pilot", "full"))
     parser.add_argument(
         "--output-root",
-        default="results/benchmark_suite",
+        default=f"/scratch1/{get_current_user()}/results/benchmark_suite",
         help="Directory that will contain the suite output directory.",
     )
     parser.add_argument(
@@ -37,12 +51,51 @@ def build_parser() -> argparse.ArgumentParser:
         "--split",
         help="Optional override applied to all selected datasets.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=("local", "vllm", "huggingface", "openai", "openrouter", "openai-compatible"),
+        help="Optional provider override. Use `local` or `vllm` for an external local OpenAI-compatible server.",
+    )
+    parser.add_argument(
+        "--api-base",
+        help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
+    )
+    parser.add_argument(
+        "--api-key-env",
+        help="Optional environment variable name for provider auth. Usually not needed for local vLLM/OpenAI-compatible servers.",
+    )
     return parser
 
 
 async def run_cli_async(args: argparse.Namespace) -> int:
     output_root = Path(args.output_root)
     spec = get_preset_spec(args.preset, output_root=output_root)
+    if args.provider or args.api_base or args.api_key_env:
+        provider = args.provider or spec.provider_config.provider
+
+        new_params = dict(spec.provider_config.default_params)
+        if provider == "vllm":
+            provider = Provider.LOCAL
+            new_params[LOCAL_LAUNCH_IMAGE] = "vllm-openai_latest.sif"
+            new_params[LOCAL_LAUNCH_BIND] = f"/scratch1/{get_current_user()}/.cache"
+            new_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] = 600
+
+            # new_params[LOCAL_LAUNCH_QUANTIZATION] = 'bitsandbytes'
+            # new_params[LOCAL_LAUNCH_LOAD_FORMAT] = 'bitsandbytes'
+            # new_params[LOCAL_LAUNCH_DTYPE] = 'bfloat16'
+            new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = '8192'
+            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = .95
+        
+        base_provider_config = default_provider_config(
+            provider=provider,
+            api_base=args.api_base,
+            api_key_env=args.api_key_env,
+        )
+        configured_provider = replace(base_provider_config, default_params=new_params)
+        spec = replace(
+            spec,
+            provider_config=configured_provider
+        )
 
     if args.models:
         spec = replace(spec, models=tuple(args.models))
