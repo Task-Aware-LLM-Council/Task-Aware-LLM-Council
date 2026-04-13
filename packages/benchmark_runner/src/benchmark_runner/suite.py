@@ -168,7 +168,6 @@ async def run_benchmark_suite(
                     print(f"batch done -{iterations}")
 
                     iterations += 1
-                    print(f"iterations - {iterations}")
                     if iterations%10==0:
                         print(f"model:{model} - source:{source.name} iterations:{iterations} done")
                     
@@ -245,7 +244,6 @@ def _load_batch_predictions(
     model: str,
     example_ids: set[str],
 ) -> list[dict[str, object]]:
-    print(f"result - {len(result.prediction_files)}")
     records: list[dict[str, object]] = []
 
     for path in result.prediction_files:

@@ -10,7 +10,8 @@ from task_eval.extraction import (
     extract_fever_label,
     extract_math_answer,
     extract_mcq_answer,
-    extract_qa_answer
+    extract_qa_answer,
+    extract_qa_answer_musique
 )
 from task_eval.interfaces import DatasetProfile, MetricCalculator
 from task_eval.models import EvaluationCase, MetricResult, PredictionRecord
@@ -53,6 +54,7 @@ __all__ = [
     "tokenize_normalized",
     "extract_answer",
     "extract_qa_answer",
+    "extract_qa_answer_musique",
     "extract_mcq_answer",
     "extract_fever_label",
     "extract_math_answer",
