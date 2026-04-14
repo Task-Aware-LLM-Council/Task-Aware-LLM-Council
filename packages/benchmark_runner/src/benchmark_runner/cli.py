@@ -84,7 +84,8 @@ async def run_cli_async(args: argparse.Namespace) -> int:
             # new_params[LOCAL_LAUNCH_LOAD_FORMAT] = 'bitsandbytes'
             # new_params[LOCAL_LAUNCH_DTYPE] = 'bfloat16'
             new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = '8192'
-            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = .95
+            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = .18
+            new_params[LOCAL_LAUNCH_QUANTIZATION] = 'compressed-tensors'
         
         base_provider_config = default_provider_config(
             provider=provider,
