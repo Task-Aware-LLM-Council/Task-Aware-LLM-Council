@@ -9,7 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "benchmarking-pipeline",
-    "datasets>=4.8.3",
+    "datasets>=4.0.0",
 ]
 
 [project.optional-dependencies]

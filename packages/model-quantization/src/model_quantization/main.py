@@ -6,7 +6,7 @@ from pathlib import Path
 
 from huggingface_hub import HfApi, login
 from llmcompressor import oneshot
-from llmcompressor.modifiers.awq import AWQModifier
+from llmcompressor.modifiers.awq import AWQModifier, AWQ_MAPPING_REGISTRY
 from llmcompressor.modifiers.quantization import GPTQModifier
 from transformers import AutoConfig
 
@@ -102,10 +102,49 @@ def main():
     print(f"--- Starting AWQ Quantization for {args.model} using llm-compressor, temp dir {temp_dir} ---")
 
 
+    # Dynamically determine the sequential target from the HF config
+    print(f"Detecting architecture for {args.model}...")
+    config = AutoConfig.from_pretrained(args.model)
+    architecture_name = config.architectures[0] if config.architectures else ""
+
+    print(f"architecture_name: {architecture_name}")
+    
+    if "ForCausalLM" in architecture_name:
+        # Translates 'Gemma2ForCausalLM' -> 'Gemma2DecoderLayer'
+        layer_class = architecture_name.replace("ForCausalLM", "DecoderLayer")
+        seq_targets = [layer_class]
+        print(f"--- Dynamically mapped {architecture_name} to target layer: {layer_class} ---")
+    else:
+        print(f"--- Warning: Non-standard architecture '{architecture_name}'. Proceeding without sequential targets. ---")
+        seq_targets = None    
+
     # 2. Dynamically Define the Recipe based on CLI input
     if args.bits == 4:
+        mappings = AWQ_MAPPING_REGISTRY.get(architecture_name)
+        if mappings is None:
+            raise ValueError(f"No AWQ mappings found for {architecture_name}")
+        else:
+            print(f"Found mappings for key:{architecture_name},\nmappings:{mappings}")
         print(f"--- Starting 4-bit (AWQ) Quantization for {args.model} ---")
         recipe = [
+            # Specific TO Gemma-2-9b0it
+            #TODO: Make this properly configurable
+            # AWQModifier(
+            #     ignore=["lm_head"],
+            #     mappings=mappings,
+            #     config_groups={
+            #         "group_0": {
+            #             "targets": ["Linear"],
+            #             "weights": {
+            #                 "num_bits": 4,
+            #                 "type": "int",
+            #                 "symmetric": True,  # <-- Forces Symmetric
+            #                 "strategy": "group",
+            #                 "group_size": 64    # <-- Lowered from 128 to recover accuracy
+            #             }
+            #         }
+            #     }
+            # )
             AWQModifier(
                 targets=["Linear"], 
                 scheme="W4A16_ASYM", 
@@ -121,20 +160,6 @@ def main():
                 ignore=["lm_head"] 
             )
         ]
-
-    # Dynamically determine the sequential target from the HF config
-    print(f"Detecting architecture for {args.model}...")
-    config = AutoConfig.from_pretrained(args.model)
-    architecture_name = config.architectures[0] if config.architectures else ""
-    
-    if "ForCausalLM" in architecture_name:
-        # Translates 'Gemma2ForCausalLM' -> 'Gemma2DecoderLayer'
-        layer_class = architecture_name.replace("ForCausalLM", "DecoderLayer")
-        seq_targets = [layer_class]
-        print(f"--- Dynamically mapped {architecture_name} to target layer: {layer_class} ---")
-    else:
-        print(f"--- Warning: Non-standard architecture '{architecture_name}'. Proceeding without sequential targets. ---")
-        seq_targets = None    
 
 
     # ==========================================

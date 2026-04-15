@@ -11,7 +11,7 @@ dependencies = [
     "benchmarking-pipeline",
     "llm-gateway",
     "task-eval",
-    "datasets>=4.8.3",
+    "datasets>=4.0.0",
     "common",
 ]
 
