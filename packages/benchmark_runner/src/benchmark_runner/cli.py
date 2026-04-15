@@ -9,6 +9,7 @@ from pathlib import Path
 from llm_gateway import (
     LOCAL_LAUNCH_BIND,
     LOCAL_LAUNCH_DTYPE,
+    LOCAL_LAUNCH_PORT,
     LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION,
     LOCAL_LAUNCH_IMAGE,
     LOCAL_LAUNCH_LOAD_FORMAT,
@@ -60,6 +61,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--api-base",
         help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
     )
+
+    parser.add_argument(
+        "--local-launch-port",
+        type=int,
+        default=8000,
+        help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
+    )
+
+    parser.add_argument(
+        "--gpu-utilization",
+        type=float,
+        default=0.33,
+        help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
+    )
+
     parser.add_argument(
         "--api-key-env",
         help="Optional environment variable name for provider auth. Usually not needed for local vLLM/OpenAI-compatible servers.",
@@ -84,7 +100,9 @@ async def run_cli_async(args: argparse.Namespace) -> int:
             # new_params[LOCAL_LAUNCH_LOAD_FORMAT] = 'bitsandbytes'
             # new_params[LOCAL_LAUNCH_DTYPE] = 'bfloat16'
             new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = '8192'
-            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = .95
+            new_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] = args.gpu_utilization
+            new_params[LOCAL_LAUNCH_PORT] = args.local_launch_port
+            new_params[LOCAL_LAUNCH_QUANTIZATION] = 'compressed-tensors'
         
         base_provider_config = default_provider_config(
             provider=provider,
