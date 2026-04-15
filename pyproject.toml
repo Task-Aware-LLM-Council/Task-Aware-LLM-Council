@@ -19,4 +19,8 @@ members = [
     "packages/benchmark_runner",
     "packages/task_eval",
     "packages/model-quantization",
+    "packages/model-orchestration",
 ]
+
+[tool.setuptools.packages.find]
+where = ["packages"]

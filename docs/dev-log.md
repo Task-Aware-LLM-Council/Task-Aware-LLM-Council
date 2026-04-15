@@ -197,6 +197,81 @@ exists. The main remaining work is no longer package creation. The main
 remaining work is hardening the dataset/profile configs and running real
 benchmark suites successfully against provider APIs.
 
+### `model-quantization`
+
+The model quantization utility exists under
+[packages/model-quantization](/home/mbhas/USC/Sem-2/NLP/Task-Aware-LLM-Council/packages/model-quantization).
+
+Implemented pieces:
+
+- CLI entrypoint through `model-quantization`
+- Hugging Face auth via `HUGGINGFACE_API_KEY`
+- architecture detection with `transformers.AutoConfig`
+- quantization recipe selection for:
+  - `4-bit` AWQ
+  - `8-bit` GPTQ
+- local artifact generation through `llmcompressor.oneshot(...)`
+- optional Hugging Face Hub repo creation and folder upload
+
+Architectural role:
+
+- this package is an offline model-preparation utility
+- it is not part of the online benchmark, gateway, or council execution path
+- its output is a quantized local folder or Hub repo that can later be served by
+  local runtime infrastructure such as the vLLM-based path
+
+Current limits:
+
+- single-script, CLI-first implementation
+- no reusable internal quantization library abstraction yet
+- AWQ support depends on the detected architecture having mappings in
+  `AWQ_MAPPING_REGISTRY`
+- recipe customization is still limited and partly hardcoded
+
+### `model-orchestration`
+
+The orchestration layer exists under
+[packages/model-orchestration](/home/mbhas/USC/Sem-2/NLP/Task-Aware-LLM-Council/packages/model-orchestration).
+
+Implemented pieces:
+
+- orchestrator config/result dataclasses:
+  - `ModelSpec`
+  - `LocalVLLMPresetConfig`
+  - `OrchestratorConfig`
+  - `OrchestratorRequest`
+  - `OrchestratorResponse`
+  - `OrchestratorCallRecord`
+- default 3-role config through `build_default_orchestrator_config(...)`
+- benchmark-aligned local vLLM preset through
+  `build_default_local_vllm_orchestrator_config(...)`
+- named client aliases for council-facing access:
+  - `qa`
+  - `reasoning` / `math` / `code`
+  - `general` / `fever`
+- async and sync orchestration entrypoints
+- lazy per-role client creation and lifecycle management
+- local-provider resolution through the existing `llm_gateway` path
+- deterministic per-role local vLLM ports for the default three roles
+- optional JSONL and in-memory request/response recording
+
+Architectural role:
+
+- this package sits above `llm_gateway`
+- it gives council callers a stable multi-model interface without embedding
+  provider/runtime switching logic in the caller
+- in local mode it owns the benchmark-aligned vLLM launch defaults and maps one
+  canonical role to one local runtime/client
+- it intentionally does not own council aggregation, routing policy, or task
+  scoring
+
+Current limits:
+
+- explicit small-role orchestration model, not a large dynamic registry system
+- no built-in voting, aggregation, or council execution policy
+- local-runtime behavior depends on the configured resolver and the
+  `llm_gateway` local provider path
+
 ## What Is Runnable Now
 
 The intended end-to-end path is:
