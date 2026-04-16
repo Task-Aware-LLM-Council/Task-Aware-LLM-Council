@@ -1,0 +1,34 @@
+[project]
+name = "council-policies"
+version = "0.1.0"
+description = "P2, P3, and P4 orchestration policies for the LLM council"
+readme = "README.md"
+authors = [
+	{
+	name = "Om Ghag",
+	email = "oghag@usc.edu"
+	}
+]
+requires-python = ">=3.14"
+dependencies = [
+	"llm-gateway",
+	"task-eval",
+]
+
+[project.optional-dependencies]
+test = [
+	"pytest>=8.3",
+	"pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.uv.sources]
+llm-gateway = {workspace = true}
+task-eval = {workspace = true}
+benchmarking-pipeline = {workspace = true}
+
+[build-system]
+requires = ["uv_build>=0.9.1,<0.10.0"]
+build-backend = "uv_build"
