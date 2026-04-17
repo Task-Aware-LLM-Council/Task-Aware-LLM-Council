@@ -1,9 +1,13 @@
 [project]
 name = "council-policies"
-version = "0.1.0"
+version = "0.1.1"
 description = "P2, P3, and P4 orchestration policies for the LLM council"
 readme = "README.md"
 authors = [
+{
+		name = "Aniruth",
+		email = "aniruths10@gmail.com"
+	} , 
 	{
 	name = "Om Ghag",
 	email = "oghag@usc.edu"
