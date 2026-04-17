@@ -37,17 +37,13 @@ For a given policy (P1, P2, P3, P4), and a set of \(N\) questions:
 
 Total tokens for question \(i\):
 
-\[
-T_i = \sum_{j=1}^{k_i} (\text{prompt\_tokens}_{ij} + \text{completion\_tokens}_{ij})
-\]
+- T_i = sum over j=1..k_i of (prompt_tokens_ij + completion_tokens_ij)
 
 Average tokens per question:
 
-\[
-\text{AvgTokensPerQuestion} = \frac{1}{N} \sum_{i=1}^{N} T_i
-\]
+- AvgTokensPerQuestion = (1 / N) * sum over i=1..N of T_i
 
-Lower values indicate **lower computational cost** and usually lower latency for a fixed deployment.[web:200][web:301]
+Lower values indicate **lower computational cost** and usually lower latency for a fixed deployment.
 
 ### 2. Average number of model calls per question
 
@@ -55,17 +51,15 @@ Using the same notation, for each question \(i\) we count how many prediction re
 
 Average calls per question:
 
-\[
-\text{AvgCallsPerQuestion} = \frac{1}{N} \sum_{i=1}^{N} k_i
-\]
-
+- AvgCallsPerQuestion = (1 / N) * sum over i=1..N of k_i
+  
 - P1 (single model) should be ~1 call per question.
 - P2 (flat council) will be ~number_of_models_per_council.
 - P3/P4 should be between these extremes if routing is effective.
 
 ### 3. Routing accuracy (planned)
 
-Routing accuracy measures how often a router chooses the same model(s) as an **oracle** that knows, for each question, which model performed best in P1.[web:301][web:300]
+Routing accuracy measures how often a router chooses the same model(s) as an **oracle** that knows, for each question, which model performed best in P1.
 
 For each example \(i\):
 
