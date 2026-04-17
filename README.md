@@ -93,3 +93,6 @@ uv run -m data_prep.upload_dataset --folder-path='./data/router_dataset' --commi
 
 - This repo uses a uv workspace with members in `packages/common`, `packages/data_prep`, `packages/training`, and `packages/inference`.
 - Internal package linking is configured via workspace sources (for example, `common` used by `data_prep` and `training`). -->
+
+## Metrics Analysis
+See [analysis/README.md](analysis/README.md) for details on system-level metrics (tokens, calls, routing accuracy) and the analysis scripts.
