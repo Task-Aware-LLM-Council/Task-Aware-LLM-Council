@@ -66,21 +66,18 @@ For each example \(i\):
 - Oracle set \(\mathcal{O}_i\): models with the best score for that example in P1.
 - Router choice \(\mathcal{R}_i\): set of models chosen by P3/P4.
 
-We define a “hit” if the router’s choice intersects the oracle set:
+We define a hit indicator for each example i:
 
-\[
-\text{hit}_i =
-\begin{cases}
-1 & \text{if } \mathcal{R}_i \cap \mathcal{O}_i \neq \emptyset \\
-0 & \text{otherwise}
-\end{cases}
-\]
+- hit_i = 1 if the router’s chosen model set R_i intersects the oracle set O_i
+- hit_i = 0 otherwise
 
-Routing accuracy:
+Formally:
 
-\[
-\text{RoutingAccuracy} = \frac{1}{N} \sum_{i=1}^{N} \text{hit}_i
-\]
+- hit_i = 1 if R_i ∩ O_i is not empty, else 0
+
+Routing accuracy is then the average of hit_i over all N examples:
+
+- RoutingAccuracy = (1 / N) * sum_{i=1..N} hit_i
 
 This isolates router quality independent of raw model quality.
 
