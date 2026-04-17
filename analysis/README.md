@@ -63,8 +63,8 @@ Routing accuracy measures how often a router chooses the same model(s) as an **o
 
 For each example \(i\):
 
-- Oracle set \(\mathcal{O}_i\): models with the best score for that example in P1.
-- Router choice \(\mathcal{R}_i\): set of models chosen by P3/P4.
+- Oracle set (O_i): models with the best score for that example in P1.
+- Router choice (R_i): set of models chosen by P3/P4.
 
 We define a hit indicator for each example i:
 
