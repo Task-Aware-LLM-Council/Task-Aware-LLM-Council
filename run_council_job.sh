@@ -12,7 +12,7 @@
 #SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --gres=gpu:a40:3
+#SBATCH --gres=gpu:a100:2
 #SBATCH --account=robinjia_1822
 #SBATCH --output=logs/council-%j.out
 #SBATCH --error=logs/council-%j.err
@@ -43,11 +43,16 @@ module load apptainer
 
 uv sync --package council-policies
 
-# Start one vLLM server per model, each pinned to a different GPU
+# GPU layout:
+#   GPU 0 (shared): gemma-2-9b-GPTQ + DeepSeek-7B-AWQ  (0.45 each, ~9GB + ~5GB)
+#   GPU 1 (solo):   Qwen2.5-14B-AWQ                     (0.90, ~9GB)
+GPU_DEVICES=(0 0 1)
+GPU_UTIL=(0.45 0.45 0.90)
+
 SERVER_PIDS=()
 for i in 0 1 2; do
-    echo "Starting vLLM server for ${MODELS[$i]} on port ${PORTS[$i]} (GPU $i)..."
-    CUDA_VISIBLE_DEVICES=$i apptainer run --nv --cleanenv \
+    echo "Starting vLLM server for ${MODELS[$i]} on port ${PORTS[$i]} (GPU ${GPU_DEVICES[$i]})..."
+    CUDA_VISIBLE_DEVICES=${GPU_DEVICES[$i]} apptainer run --nv --cleanenv \
         --bind "${CACHE_DIR}:${CACHE_DIR}" \
         --env "HF_HOME=${CACHE_DIR}" \
         --env "HF_TOKEN=${HF_TOKEN:-}" \
@@ -56,7 +61,7 @@ for i in 0 1 2; do
         --trust-remote-code \
         --host 0.0.0.0 \
         --port "${PORTS[$i]}" \
-        --gpu-memory-utilization 0.90 &
+        --gpu-memory-utilization "${GPU_UTIL[$i]}" &
     SERVER_PIDS+=($!)
 done
 
