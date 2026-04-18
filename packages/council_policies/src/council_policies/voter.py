@@ -8,9 +8,9 @@ from llm_gateway import PromptRequest
 from model_orchestration import ModelOrchestrator, OrchestratorResponse
 
 from council_policies.prompts import (
-    AGGREGATOR_SYSTEM_PROMPT,
+    TIEBREAK_SYSTEM_PROMPT,
     VOTER_SYSTEM_PROMPT,
-    build_aggregator_prompt,
+    build_tiebreak_prompt,
     build_voter_prompt,
     parse_vote,
 )
@@ -97,8 +97,8 @@ async def _break_tie(
 ) -> str:
     tied_answers = {label: labeled_answers[label] for label in tied_labels}
     arb_request = PromptRequest(
-        system_prompt=AGGREGATOR_SYSTEM_PROMPT,
-        user_prompt=build_aggregator_prompt(question, tied_answers, tally),
+        system_prompt=TIEBREAK_SYSTEM_PROMPT,
+        user_prompt=build_tiebreak_prompt(question, tied_answers, tally),
     )
     try:
         result = await orchestrator.general_client.get_response(arb_request)
