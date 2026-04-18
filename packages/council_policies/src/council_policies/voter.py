@@ -181,9 +181,13 @@ def majority_winner(tally: dict[str, int]) -> str | None:
 # Step 4 (optional): Tiebreak via aggregator
 # ---------------------------------------------------------------------------
 
-def _parse_aggregator_winner(raw: str) -> str:
-    match = re.search(r"Winner:\s*([ABC]|NONE)", raw, re.IGNORECASE)
-    return match.group(1).upper() if match else "NONE"
+def _parse_aggregator_result(raw: str) -> tuple[str, str | None]:
+    """Returns (winner_label, final_answer_or_None)."""
+    winner_match = re.search(r"Winner:\s*([ABC]|NONE)", raw, re.IGNORECASE)
+    winner = winner_match.group(1).upper() if winner_match else "NONE"
+    final_match = re.search(r"Final Answer:\s*(.+)", raw, re.IGNORECASE | re.DOTALL)
+    final_answer = final_match.group(1).strip() if final_match else None
+    return winner, final_answer
 
 
 async def run_aggregator(
@@ -191,8 +195,10 @@ async def run_aggregator(
     question: str,
     answers: list[CouncilAnswer],
     votes: list[Vote],
-) -> str:
-    """Call the aggregator prompt with one model to break a tie. Returns winning label."""
+) -> tuple[str, str | None]:
+    """Call the aggregator prompt with one model to break a tie.
+    Returns (winning_label, final_answer) where final_answer may override the winning answer.
+    """
     votes_summary = "\n".join(
         f"{v.voter_model_id} voted: {v.voted_for} (Confidence: {v.confidence})"
         for v in votes
@@ -212,7 +218,7 @@ async def run_aggregator(
     )
     async with client:
         response = await client.generate(request)
-    return _parse_aggregator_winner(response.text)
+    return _parse_aggregator_result(response.text)
 
 
 # ---------------------------------------------------------------------------
@@ -256,22 +262,24 @@ async def run_council(
     tiebreak_used = False
 
     # Step 4: tiebreak if needed
+    aggregator_final_answer: str | None = None
     if winner_label is None:
         tiebreak_used = True
         arb = arbitrator or models[0]
-        winner_label = await run_aggregator(arb, question, answers, votes)
+        winner_label, aggregator_final_answer = await run_aggregator(arb, question, answers, votes)
 
     # Map label back to answer/model
     label_to_index = {"A": 0, "B": 1, "C": 2}
     idx = label_to_index.get(winner_label, 0)
     winning_answer_obj = answers[idx] if winner_label != "NONE" else answers[0]
+    winning_answer = aggregator_final_answer or winning_answer_obj.answer
 
     return CouncilResult(
         question=question,
         answers=answers,
         votes=votes,
         winner_label=winner_label,
-        winning_answer=winning_answer_obj.answer,
+        winning_answer=winning_answer,
         winning_model_id=winning_answer_obj.model_config.model_id,
         tiebreak_used=tiebreak_used,
     )
