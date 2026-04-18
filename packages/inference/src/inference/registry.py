@@ -22,30 +22,6 @@ _DEFAULT_PATH = Path(os.getenv(
     str(_RESULTS_DIR / "specialists.json"),
 ))
 
-# _FALLBACK_SPECIALISTS: dict[str, list[str]] = {
-#     TaskTag.QA_MULTIHOP.value: ["internlm/internlm2.5-7b-chat-1m"],
-#     TaskTag.QA_LONGCTX.value:  ["Qwen/Qwen2.5-14B-Instruct"],
-#     TaskTag.FACT_VERIFY.value: ["Qwen/Qwen2.5-7B-Instruct"],
-#     TaskTag.MATH.value:        ["deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"],
-#     TaskTag.CODE.value:        ["deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"],
-#     "_best_overall": "Qwen/Qwen2.5-14B-Instruct",
-#     "_full_pool": [
-#         "01-ai/Yi-1.5-9B-Chat-16K",
-#         "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
-#         "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-#         "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-#         "google/gemma-2-9b-it",
-#         "internlm/internlm2.5-7b-chat-1m",
-#         "mistralai/Mistral-Nemo-Instruct-2407",
-#         "NousResearch/Hermes-3-Llama-3.1-8B",
-#         "Qwen/Qwen2.5-7B-Instruct",
-#         "Qwen/Qwen2.5-14B-Instruct",
-#         "Qwen/Qwen2.5-Coder-7B-Instruct",
-#         "THUDM/glm-4-9b-chat",
-#     ],
-# }
-
-
 class SpecialistRegistry:
     def __init__(self, path: Optional[Path] = None) -> None:
         self._path = path or _DEFAULT_PATH
@@ -58,39 +34,31 @@ class SpecialistRegistry:
                 self._data = json.load(f)
             logger.info("Loaded specialists from %s", self._path)
         else:
-            logger.warning(
-                "specialists.json not found at %s — using fallback defaults.\n"
-                "Run the W1 specialist-selection script first:\n"
-                "  uv run -m data_prep.select_specialists",
-                self._path,
+            raise FileNotFoundError(
+                f"specialists.json not found at {self._path}.\n"
+                "Run the specialist-selection script first:\n"
+                "  uv run -m data_prep.select_specialists"
             )
-            #self._data = _FALLBACK_SPECIALISTS
 
     def specialists_for(self, tag: TaskTag) -> list[str]:
         models = self._data.get(tag.value, [])
         if isinstance(models, str):
             models = [models]
         if not models:
-            logger.warning("No specialists for tag=%s; using full pool", tag)
-            return self.full_pool()
+            raise KeyError(f"No specialists registered for tag={tag!r} in {self._path}")
         return list(models)
 
     def full_pool(self) -> list[str]:
         pool = self._data.get("_full_pool", [])
         if not pool:
-            pool = [m for k, v in self._data.items()
-                    if not k.startswith("_")
-                    for m in (v if isinstance(v, list) else [v])]
+            raise KeyError(f"'_full_pool' key missing in {self._path}")
         return list(pool)
 
     def best_overall(self) -> str:
         best = self._data.get("_best_overall")
         if best and isinstance(best, str):
             return best
-        pool = self.full_pool()
-        if pool:
-            return pool[0]
-        raise RuntimeError("Specialist registry is empty")
+        raise KeyError(f"'_best_overall' key missing in {self._path}")
 
     def reload(self) -> None:
         self._load()
