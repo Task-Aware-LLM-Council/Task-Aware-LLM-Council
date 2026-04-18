@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-VLLM_IMAGE="/path/to/vllm.sif"   # <-- update this to your Apptainer image path
+VLLM_IMAGE="/project/robinjia_1822/Task-Aware-LLM-Council/vllm-openai_latest.sif"
 CACHE_DIR="/scratch1/$(whoami)/.cache/huggingface"
 PORTS=(8000 8001 8002)
 MODELS=(
