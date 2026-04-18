@@ -22,28 +22,28 @@ _DEFAULT_PATH = Path(os.getenv(
     str(_RESULTS_DIR / "specialists.json"),
 ))
 
-_FALLBACK_SPECIALISTS: dict[str, list[str]] = {
-    TaskTag.QA_MULTIHOP.value: ["internlm/internlm2.5-7b-chat-1m"],
-    TaskTag.QA_LONGCTX.value:  ["Qwen/Qwen2.5-14B-Instruct"],
-    TaskTag.FACT_VERIFY.value: ["Qwen/Qwen2.5-7B-Instruct"],
-    TaskTag.MATH.value:        ["deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"],
-    TaskTag.CODE.value:        ["deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"],
-    "_best_overall": "Qwen/Qwen2.5-14B-Instruct",
-    "_full_pool": [
-        "01-ai/Yi-1.5-9B-Chat-16K",
-        "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
-        "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
-        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        "google/gemma-2-9b-it",
-        "internlm/internlm2.5-7b-chat-1m",
-        "mistralai/Mistral-Nemo-Instruct-2407",
-        "NousResearch/Hermes-3-Llama-3.1-8B",
-        "Qwen/Qwen2.5-7B-Instruct",
-        "Qwen/Qwen2.5-14B-Instruct",
-        "Qwen/Qwen2.5-Coder-7B-Instruct",
-        "THUDM/glm-4-9b-chat",
-    ],
-}
+# _FALLBACK_SPECIALISTS: dict[str, list[str]] = {
+#     TaskTag.QA_MULTIHOP.value: ["internlm/internlm2.5-7b-chat-1m"],
+#     TaskTag.QA_LONGCTX.value:  ["Qwen/Qwen2.5-14B-Instruct"],
+#     TaskTag.FACT_VERIFY.value: ["Qwen/Qwen2.5-7B-Instruct"],
+#     TaskTag.MATH.value:        ["deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"],
+#     TaskTag.CODE.value:        ["deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"],
+#     "_best_overall": "Qwen/Qwen2.5-14B-Instruct",
+#     "_full_pool": [
+#         "01-ai/Yi-1.5-9B-Chat-16K",
+#         "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+#         "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+#         "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+#         "google/gemma-2-9b-it",
+#         "internlm/internlm2.5-7b-chat-1m",
+#         "mistralai/Mistral-Nemo-Instruct-2407",
+#         "NousResearch/Hermes-3-Llama-3.1-8B",
+#         "Qwen/Qwen2.5-7B-Instruct",
+#         "Qwen/Qwen2.5-14B-Instruct",
+#         "Qwen/Qwen2.5-Coder-7B-Instruct",
+#         "THUDM/glm-4-9b-chat",
+#     ],
+# }
 
 
 class SpecialistRegistry:
@@ -64,7 +64,7 @@ class SpecialistRegistry:
                 "  uv run -m data_prep.select_specialists",
                 self._path,
             )
-            self._data = _FALLBACK_SPECIALISTS
+            #self._data = _FALLBACK_SPECIALISTS
 
     def specialists_for(self, tag: TaskTag) -> list[str]:
         models = self._data.get(tag.value, [])
