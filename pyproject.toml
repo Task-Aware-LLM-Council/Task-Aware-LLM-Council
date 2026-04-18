@@ -19,4 +19,5 @@ members = [
     "packages/benchmark_runner",
     "packages/task_eval",
     "packages/model-quantization",
+    "packages/council_policies",
 ]
