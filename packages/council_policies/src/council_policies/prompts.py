@@ -65,6 +65,82 @@ def parse_vote(response_text: str, valid_labels: list[str]) -> str | None:
 
 
 # --------------------------------------------------------------------------- #
+# Rater (P2 dataset council): score each candidate answer numerically.
+# Same labeled layout as the voter prompt but asks for JSON scores 1-10
+# instead of a single letter, so ratings can be aggregated across questions.
+# --------------------------------------------------------------------------- #
+
+_RATING_JSON_SCHEMA = (
+    '{"A": {"score": <1-10>, "reasoning": "<one sentence>"},'
+    ' "B": {"score": <1-10>, "reasoning": "<one sentence>"},'
+    ' "C": {"score": <1-10>, "reasoning": "<one sentence>"}}'
+)
+
+RATER_SYSTEM_PROMPT = (
+    "You are an impartial judge evaluating answers to a question. "
+    "Score each answer from 1 to 10 based on accuracy, completeness, and clarity. "
+    "10 is the best possible answer; 1 is completely wrong or irrelevant. "
+    "Do NOT factor in answer length alone. "
+    "Output ONLY a JSON object — no prose before or after it."
+)
+
+
+def build_rating_prompt(question: str, labeled_answers: dict[str, str]) -> str:
+    """
+    Reuses the same labeled-answers layout as build_voter_prompt but instructs
+    the model to return JSON scores instead of a single letter.
+    """
+    answers_block = "\n\n".join(
+        f"Answer {label}:\n{text}" for label, text in labeled_answers.items()
+    )
+    return (
+        f"Question:\n{question}\n\n"
+        f"{answers_block}\n\n"
+        f"Rate every answer using exactly this JSON format:\n{_RATING_JSON_SCHEMA}"
+    )
+
+
+def parse_ratings(
+    response_text: str, valid_labels: list[str]
+) -> dict[str, float] | None:
+    """
+    Parse a JSON rating response into a label→score dict.
+    Tries strict JSON first, then a regex fallback.
+    Returns None if neither yields all expected labels.
+    """
+    import json
+    import re
+
+    cleaned = re.sub(r"```(?:json)?\s*([\s\S]*?)\s*```", r"\1", response_text).strip()
+
+    def _clamp(v: float) -> float:
+        return max(1.0, min(10.0, v))
+
+    # Attempt 1: full JSON
+    try:
+        data = json.loads(cleaned)
+        scores: dict[str, float] = {}
+        for label in valid_labels:
+            if label not in data:
+                return None
+            scores[label] = _clamp(float(data[label]["score"]))
+        return scores
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        pass
+
+    # Attempt 2: regex per label
+    scores = {}
+    for label in valid_labels:
+        m = re.search(
+            rf'"{label}"\s*:\s*\{{[^}}]*"score"\s*:\s*(\d+(?:\.\d+)?)', cleaned
+        )
+        if not m:
+            return None
+        scores[label] = _clamp(float(m.group(1)))
+    return scores if len(scores) == len(valid_labels) else None
+
+
+# --------------------------------------------------------------------------- #
 # Synthesizer (P3/P4 multi-skill): combine complementary specialist outputs.
 # Each specialist handled a different slice of the task; the synthesizer fuses
 # them into one answer without dropping any claim.
