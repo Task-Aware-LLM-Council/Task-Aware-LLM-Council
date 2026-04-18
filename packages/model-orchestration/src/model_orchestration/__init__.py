@@ -1,9 +1,11 @@
 from model_orchestration.client import OrchestratedModelClient
+from model_orchestration.fanout import FanoutSession
 from model_orchestration.defaults import (
     DEFAULT_GENERAL_MODEL,
     DEFAULT_LOCAL_VLLM_BIND,
     DEFAULT_QA_MODEL,
     DEFAULT_REASONING_MODEL,
+    DEFAULT_SYNTHESIZER_MODEL,
     build_default_orchestrator_config,
     build_default_local_vllm_orchestrator_config,
 )
@@ -31,6 +33,8 @@ __all__ = [
     "DEFAULT_LOCAL_VLLM_BIND",
     "DEFAULT_QA_MODEL",
     "DEFAULT_REASONING_MODEL",
+    "DEFAULT_SYNTHESIZER_MODEL",
+    "FanoutSession",
     "InMemoryRecorder",
     "JSONLRecorder",
     "JSONLRecordingConfig",

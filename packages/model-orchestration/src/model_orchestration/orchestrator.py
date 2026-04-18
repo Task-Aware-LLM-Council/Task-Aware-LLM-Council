@@ -9,6 +9,7 @@ from typing import Any, Callable
 from llm_gateway import BaseLLMClient, PromptRequest
 
 from model_orchestration.client import OrchestratedModelClient
+from model_orchestration.fanout import FanoutSession
 from model_orchestration.models import (
     ModelSpec,
     OrchestratorCallRecord,
@@ -108,6 +109,21 @@ class ModelOrchestrator:
     def get_client(self, alias: str) -> OrchestratedModelClient:
         self._require_alias(alias)
         return OrchestratedModelClient(self, alias)
+
+    def fanout(self, roles: list[str] | tuple[str, ...]) -> FanoutSession:
+        """Open a scoped fan-out session over `roles`.
+
+        Use with `async with`:
+
+            async with orchestrator.fanout(["qa", "reasoning", "general"]) as session:
+                qa_out = await session.run_role("qa", [req])
+                ...
+
+        Roles are canonicalized via the alias table; passing an unknown
+        alias raises KeyError at open time (before any model is loaded).
+        """
+        canonical = frozenset(self._canonical_role(role) for role in roles)
+        return FanoutSession(self, canonical)
 
     async def run(
         self,
