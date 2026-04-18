@@ -12,8 +12,12 @@ not a pick from the inputs.
 Design (per Aniruth, 2026-04-17):
   - Input is a map role -> OrchestratorResponse (full text, not extracted).
   - A single synthesizer LLM call fuses them; no deterministic path.
-  - Synthesizer role defaults to 'general' but is configurable — down the
-    line model-orchestration may add a dedicated 'synthesizer' role.
+  - Synthesizer role defaults to the dedicated 'synthesizer' role registered
+    in model-orchestration. It is excluded from TASK_TO_ROLE so rule-based
+    routing can never dispatch a user task to it, preserving the referee
+    property.
+  - Self-bias guard: refuse to synthesize if synthesizer_role also appears
+    as a key in partials (would over-weight its own partial).
   - On synthesizer failure we fall back to the first partial rather than
     raising, so the surrounding policy can still return *something*.
 """
@@ -65,7 +69,7 @@ async def synthesize(
     question: str,
     partials: dict[str, OrchestratorResponse],
     orchestrator: ModelOrchestrator,
-    synthesizer_role: str = "general",
+    synthesizer_role: str = "synthesizer",
 ) -> SynthesisResult:
     """
     Fuse per-specialist partial answers into one final response.
@@ -80,11 +84,20 @@ async def synthesize(
     orchestrator
         Used to invoke the synthesizer.
     synthesizer_role
-        Which orchestrator role performs the fusion. 'general' by default;
-        override to a dedicated 'synthesizer' role once one exists.
+        Which orchestrator role performs the fusion. Defaults to the
+        dedicated 'synthesizer' role; override only if you have a well-
+        justified reason. Must not appear as a key in ``partials``.
     """
     if not partials:
         raise ValueError("synthesize() requires at least one partial response")
+
+    if synthesizer_role in partials:
+        raise ValueError(
+            f"synthesizer_role {synthesizer_role!r} also appears as a specialist "
+            f"in partials — refusing to synthesize to avoid self-bias. Use a "
+            f"role that is not in TASK_TO_ROLE (the dedicated 'synthesizer' role "
+            f"registered in model-orchestration satisfies this)."
+        )
 
     # Short-circuit: one specialist = nothing to synthesize. Return its
     # response verbatim so single-skill P3 doesn't pay an extra LLM hop.

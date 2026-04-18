@@ -107,7 +107,7 @@ class RuleBasedRoutingPolicy:
         available.  For single-specialist P3 this role is never actually
         called (short-circuit), but it must be registered so the upgraded
         multi-skill path works without reconfiguring callers.  Defaults to
-        ``"general"``.
+        the dedicated ``"synthesizer"`` role (excluded from TASK_TO_ROLE).
     """
 
     def __init__(
@@ -115,27 +115,30 @@ class RuleBasedRoutingPolicy:
         orchestrator: ModelOrchestrator,
         *,
         fallback_role: str = "general",
-        synthesizer_role: str = "general",
+        synthesizer_role: str = "synthesizer",
     ) -> None:
         self.orchestrator = orchestrator
         self.fallback_role = fallback_role
         self.synthesizer_role = synthesizer_role
-        # FIX: validate fallback_role at construction time so misconfiguration
-        # surfaces immediately rather than silently at inference time.
-        self._validate_fallback_role()
+        # Validate both roles at construction time so misconfiguration surfaces
+        # immediately rather than silently at inference time. synthesizer_role
+        # is validated here too so the multi-skill path can't blow up on first
+        # fan-out just because someone forgot to register the referee.
+        self._validate_role("fallback_role", self.fallback_role)
+        self._validate_role("synthesizer_role", self.synthesizer_role)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _validate_fallback_role(self) -> None:
+    def _validate_role(self, field_name: str, role: str) -> None:
         try:
-            self.orchestrator.get_client(self.fallback_role)
+            self.orchestrator.get_client(role)
         except KeyError as exc:
             raise ValueError(
-                f"RuleBasedRoutingPolicy: fallback_role {self.fallback_role!r} is not "
-                f"registered in the orchestrator. Register a model with that role or "
-                f"alias, or pass a different fallback_role."
+                f"RuleBasedRoutingPolicy: {field_name} {role!r} is not registered "
+                f"in the orchestrator. Register a model with that role or alias, "
+                f"or pass a different {field_name}."
             ) from exc
 
     def classify(self, prompt: str) -> TaskType:

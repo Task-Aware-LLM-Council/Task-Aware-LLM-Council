@@ -16,6 +16,11 @@ class TaskType(str, Enum):
     FEVER = "fever"
 
 
+# NOTE: the "synthesizer" role is intentionally absent from this map.
+# It is a referee role invoked only by synthesis.synthesize() to fuse
+# specialist partials; rule-based routing must never dispatch a user task
+# to it (doing so defeats the self-bias guard in synthesis.py). See
+# scratch/plan_dedicated_synthesizer.md.
 TASK_TO_ROLE: dict[TaskType, str] = {
     TaskType.QA: "qa",
     TaskType.REASONING: "reasoning",
