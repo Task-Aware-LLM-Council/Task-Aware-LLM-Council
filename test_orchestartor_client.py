@@ -24,7 +24,7 @@ async def main():
         print(response.usage.total_tokens)
 
         response = await orchestrator.reasoning_client.get_response(
-            PromptRequest(user_prompt="Provide me just 1 prrof of 2 lines for pythagoras theorem")
+            PromptRequest(user_prompt="Provide me just 1 proof of 2 lines for pythagoras theorem")
         )
         print(response.text)
         print(response.model)
@@ -41,5 +41,5 @@ async def main():
         print(response.provider)
         print(response.usage.total_tokens)
 
-# Run the async function
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

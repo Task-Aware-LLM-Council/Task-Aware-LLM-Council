@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Iterable
-import asyncio
-import time
+
+logger = logging.getLogger(__name__)
 
 from benchmarking_pipeline import (
     BenchmarkDataset,
@@ -87,7 +90,7 @@ async def run_benchmark_suite(
                 if source.name == "hardmath" or source.name == "humaneval_plus":
                 #     batch_size = 15
                     max_concurrency = 60
-                print(f"Started running for model:{model} - source:{source.name} - batch_size:{batch_size} - max_concurrency:{max_concurrency}")
+                logger.info("Started running for model:%s - source:%s - batch_size:%s - max_concurrency:%s", model, source.name, batch_size, max_concurrency)
                 start_time = time.perf_counter()  # START TIMER
                 dataset_metadata = dict(getattr(source, "metadata", {}))
                 metric = metric_resolver(source)
@@ -106,7 +109,7 @@ async def run_benchmark_suite(
                         max_cases=spec.max_examples_per_dataset,
                     )
                 ):  
-                    print(f"running batch-{iterations}")
+                    logger.info("running batch-%s", iterations)
                     await asyncio.sleep(spec.delay_between_requests)
                     batch_examples = tuple(case.example for case in batch)
                     case_lookup = {case.example.example_id: case for case in batch}
@@ -129,23 +132,23 @@ async def run_benchmark_suite(
                         provider_params=dict(spec.provider_params),
                     )
 
-                    print(f"Running pipeline - {iterations}")
+                    logger.info("Running pipeline - %s", iterations)
                     result = await pipeline_runner(
                         (BenchmarkDataset(name=source.name, examples=batch_examples),),
                         pipeline_config,
                     )
-                    print(f"Pipeline done - {iterations}")
+                    logger.info("Pipeline done - %s", iterations)
 
-                    print(f"loading predictions - {iterations}")
+                    logger.info("loading predictions - %s", iterations)
                     batch_prediction_records = _load_batch_predictions(
                         result,
                         dataset_name=source.name,
                         model=model,
                         example_ids=set(case_lookup),
                     )
-                    print(f"predictions loaded - {iterations}")
+                    logger.info("predictions loaded - %s", iterations)
 
-                    print(f"scoring predictions - {iterations}")
+                    logger.info("scoring predictions - %s", iterations)
                     for prediction in batch_prediction_records:
                         record = _score_prediction(
                             suite_id=suite_id,
@@ -163,17 +166,17 @@ async def run_benchmark_suite(
                         else:
                             failed_examples += 1
                     
-                    print(f"predictions scored - {iterations}")
+                    logger.info("predictions scored - %s", iterations)
 
-                    print(f"batch done -{iterations}")
+                    logger.info("batch done - %s", iterations)
 
                     iterations += 1
                     if iterations%10==0:
-                        print(f"model:{model} - source:{source.name} iterations:{iterations} done")
+                        logger.info("model:%s - source:%s iterations:%s done", model, source.name, iterations)
                     
                 end_time = time.perf_counter()    # END TIMER
                 elapsed = end_time - start_time
-                print(f"Finished running for model:{model} - source:{source.name} in {elapsed:.2f} seconds")
+                logger.info("Finished running for model:%s - source:%s in %.2f seconds", model, source.name, elapsed)
                 total_pairs += 1
                 summary = _build_summary(
                     suite_id=suite_id,

@@ -118,7 +118,7 @@ class MusiqueProfile(BaseDatasetProfile):
         elif isinstance(raw_context, str):
             best_paragraphs = [p.strip() for p in raw_context.split('\n\n') if p.strip()][:4]
 
-        # 3Assemble the Shrunk Oracle Context
+        # Assemble the Shrunk Oracle Context
         context_str = "\n\n".join(best_paragraphs)
 
         answers = _as_list(_first_present(
