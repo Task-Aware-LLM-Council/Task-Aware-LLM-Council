@@ -56,10 +56,58 @@ def classify_task(prompt: str) -> TaskType:
     return TaskType.QA
 
 
+# ---------------------------------------------------------------------------
+# Lazy synthesis import
+# ---------------------------------------------------------------------------
+# Per the README (§Two aggregation paradigms), P3 aggregates using
+# synthesis.synthesize — NOT voter.run_vote.  synthesis.py is listed as
+# "stable" in the package table but has not been created yet.
+#
+# We attempt the import here so that:
+#   • p3_policy.py is importable and testable right now (no crash).
+#   • The synthesis path activates automatically the moment synthesis.py lands
+#     — no further edits required to p3_policy.py.
+# ---------------------------------------------------------------------------
+try:
+    from council_policies.synthesis import synthesize as _synthesize  # type: ignore[import-not-found]
+    _SYNTHESIS_AVAILABLE = True
+    logger.debug("council_policies.synthesis loaded — P3 will use synthesis aggregation.")
+except ImportError:
+    _synthesize = None  # type: ignore[assignment]
+    _SYNTHESIS_AVAILABLE = False
+    logger.debug(
+        "council_policies.synthesis not found — P3 will return the specialist "
+        "response directly until synthesis.py is created."
+    )
+
+
 class RuleBasedRoutingPolicy:
     """
     P3: Route each request to the specialist model best suited for the task
-    using keyword-based classification derived from P1 benchmark results.
+    using keyword-based classification.
+
+    Aggregation (per README §Two aggregation paradigms)
+    ---------------------------------------------------
+    P3 uses *synthesis*, not voting.  When ``synthesis.py`` is present, the
+    routed specialist's response is passed to ``synthesize()`` which short-
+    circuits for a single-specialist call (no extra LLM call) and returns the
+    response verbatim.  This keeps P3 ready for the multi-skill upgrade
+    described in the README without any further changes to this file.
+
+    Parameters
+    ----------
+    orchestrator:
+        A fully-configured ModelOrchestrator.
+    fallback_role:
+        Role to use when the classified role is not registered in the
+        orchestrator.  Validated at construction time.  Defaults to
+        ``"general"``.
+    synthesizer_role:
+        The role whose model fuses partials when ``synthesis.py`` is
+        available.  For single-specialist P3 this role is never actually
+        called (short-circuit), but it must be registered so the upgraded
+        multi-skill path works without reconfiguring callers.  Defaults to
+        ``"general"``.
     """
 
     def __init__(
@@ -67,12 +115,35 @@ class RuleBasedRoutingPolicy:
         orchestrator: ModelOrchestrator,
         *,
         fallback_role: str = "general",
+        synthesizer_role: str = "general",
     ) -> None:
         self.orchestrator = orchestrator
         self.fallback_role = fallback_role
+        self.synthesizer_role = synthesizer_role
+        # FIX: validate fallback_role at construction time so misconfiguration
+        # surfaces immediately rather than silently at inference time.
+        self._validate_fallback_role()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _validate_fallback_role(self) -> None:
+        try:
+            self.orchestrator.get_client(self.fallback_role)
+        except KeyError as exc:
+            raise ValueError(
+                f"RuleBasedRoutingPolicy: fallback_role {self.fallback_role!r} is not "
+                f"registered in the orchestrator. Register a model with that role or "
+                f"alias, or pass a different fallback_role."
+            ) from exc
 
     def classify(self, prompt: str) -> TaskType:
         return classify_task(prompt)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def run(
         self,
@@ -84,18 +155,77 @@ class RuleBasedRoutingPolicy:
             task_type = self.classify(request.user_prompt or "")
 
         role = TASK_TO_ROLE[task_type]
+
+        # Dispatch to the specialist; fall back gracefully if not configured.
         try:
             response = await self.orchestrator.get_client(role).get_response(request)
+            routed_role = role
         except KeyError:
             logger.warning(
                 "Role %r not configured; falling back to %r", role, self.fallback_role
             )
-            response = await self.orchestrator.get_client(self.fallback_role).get_response(request)
+            # FIX: guard the fallback call — a missing fallback_role now raises
+            # a clear RuntimeError instead of a bare KeyError.
+            try:
+                response = await self.orchestrator.get_client(
+                    self.fallback_role
+                ).get_response(request)
+                routed_role = self.fallback_role
+            except KeyError as exc:
+                raise RuntimeError(
+                    f"Primary role {role!r} and fallback role {self.fallback_role!r} "
+                    f"are both missing from the orchestrator. "
+                    f"Register at least one of them before running P3."
+                ) from exc
 
+        # ------------------------------------------------------------------
+        # Aggregation via synthesis (README §Two aggregation paradigms)
+        # ------------------------------------------------------------------
+        # Even for a single specialist, we route through synthesize() so the
+        # caller gets a consistent CouncilResponse shape and the policy is
+        # ready for the multi-skill upgrade with no further changes.
+        #
+        # synthesize({role: response}) short-circuits when len(partials) == 1
+        # and returns the single response verbatim — no extra LLM call.
+        # ------------------------------------------------------------------
+        if _SYNTHESIS_AVAILABLE:
+            try:
+                result = await _synthesize(
+                    question=request.user_prompt or "",
+                    partials={routed_role: response},
+                    orchestrator=self.orchestrator,
+                    synthesizer_role=self.synthesizer_role,
+                )
+                return CouncilResponse(
+                    winner=result.response,
+                    policy="p3",
+                    task_type=task_type,
+                    candidates=(response,),
+                    metadata={
+                        "routed_role": routed_role,
+                        "synthesizer_role": self.synthesizer_role,
+                        "synthesis_skipped": getattr(result, "skipped", None),
+                    },
+                )
+            except Exception as exc:  # pragma: no cover
+                # Synthesis call failed — log and fall through to direct return
+                # so a synthesis bug never silently kills the whole policy run.
+                logger.warning(
+                    "synthesize() raised %s — returning specialist response directly: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+
+        # synthesis.py not yet created (or synthesis call failed above).
+        # Return the response directly.
+        # TODO: remove the non-synthesis fallback once synthesis.py is merged.
         return CouncilResponse(
             winner=response,
             policy="p3",
             task_type=task_type,
             candidates=(response,),
-            metadata={"routed_role": role},
+            metadata={
+                "routed_role": routed_role,
+                "synthesis_available": _SYNTHESIS_AVAILABLE,
+            },
         )
