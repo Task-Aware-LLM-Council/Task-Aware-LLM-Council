@@ -32,9 +32,14 @@ from model_orchestration.models import (
 )
 
 
-DEFAULT_QA_MODEL = "google/gemma-2-9b-it"
-DEFAULT_REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
-DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+API_DEFAULT_QA_MODEL = "google/gemma-2-9b-it"
+API_DEFAULT_REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+API_DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+
+vLLM_DEFAULT_QA_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
+vLLM_DEFAULT_REASONING_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
+vLLM_DEFAULT_GENERAL_MODEL = "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
+
 DEFAULT_LOCAL_VLLM_BIND = f"/scratch1/{get_current_user()}/.cache"
 
 
@@ -44,9 +49,9 @@ def build_default_orchestrator_config(
     api_base: str | None = None,
     api_key_env: str | None = None,
     provider_defaults: dict[str, object] | None = None,
-    qa_model: str = DEFAULT_QA_MODEL,
-    reasoning_model: str = DEFAULT_REASONING_MODEL,
-    general_model: str = DEFAULT_GENERAL_MODEL,
+    qa_model: str = API_DEFAULT_QA_MODEL,
+    reasoning_model: str = API_DEFAULT_REASONING_MODEL,
+    general_model: str = API_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
 ) -> OrchestratorConfig:
@@ -113,9 +118,9 @@ def build_default_orchestrator_config(
 
 def build_default_local_vllm_orchestrator_config(
     *,
-    qa_model: str = DEFAULT_QA_MODEL,
-    reasoning_model: str = DEFAULT_REASONING_MODEL,
-    general_model: str = DEFAULT_GENERAL_MODEL,
+    qa_model: str = vLLM_DEFAULT_QA_MODEL,
+    reasoning_model: str = vLLM_DEFAULT_REASONING_MODEL,
+    general_model: str = vLLM_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
     preset: LocalVLLMPresetConfig | None = None,

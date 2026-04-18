@@ -1,9 +1,12 @@
 from model_orchestration.client import OrchestratedModelClient
 from model_orchestration.defaults import (
-    DEFAULT_GENERAL_MODEL,
+    API_DEFAULT_QA_MODEL,
+    API_DEFAULT_REASONING_MODEL,
+    API_DEFAULT_GENERAL_MODEL,
+    vLLM_DEFAULT_QA_MODEL,
+    vLLM_DEFAULT_REASONING_MODEL,
+    vLLM_DEFAULT_GENERAL_MODEL,
     DEFAULT_LOCAL_VLLM_BIND,
-    DEFAULT_QA_MODEL,
-    DEFAULT_REASONING_MODEL,
     build_default_orchestrator_config,
     build_default_local_vllm_orchestrator_config,
 )
@@ -27,10 +30,13 @@ from model_orchestration.recorders import (
 
 __all__ = [
     "BaseRecorder",
-    "DEFAULT_GENERAL_MODEL",
+    "API_DEFAULT_QA_MODEL",
+    "API_DEFAULT_REASONING_MODEL",
+    "API_DEFAULT_GENERAL_MODEL",
+    "vLLM_DEFAULT_QA_MODEL",
+    "vLLM_DEFAULT_REASONING_MODEL",
+    "vLLM_DEFAULT_GENERAL_MODEL",
     "DEFAULT_LOCAL_VLLM_BIND",
-    "DEFAULT_QA_MODEL",
-    "DEFAULT_REASONING_MODEL",
     "InMemoryRecorder",
     "JSONLRecorder",
     "JSONLRecordingConfig",

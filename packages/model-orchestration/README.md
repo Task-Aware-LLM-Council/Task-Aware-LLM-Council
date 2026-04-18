@@ -124,6 +124,7 @@ from model_orchestration import (
 config = build_default_local_vllm_orchestrator_config()
 
 async with ModelOrchestrator(config) as orchestrator:
+    await orchestrator.load_all(max_parallel=2)
     qa = await orchestrator.qa_client.get_response(user_prompt="Answer this.")
     math = await orchestrator.math_client.get_response(user_prompt="Solve this.")
     general = await orchestrator.general_client.get_response(user_prompt="Check this claim.")
@@ -139,6 +140,11 @@ Aliases reuse the canonical client:
 
 - `math` and `code` reuse `reasoning`
 - `fever` reuses `general`
+
+Use `await orchestrator.load_all()` when you want all configured local vLLM
+roles to start in parallel before the first request. Pass
+`max_parallel=2` to stagger startup in batches. For non-local/API-backed
+providers, `load_all()` is a no-op.
 
 ## Default Role Mapping
 
@@ -441,11 +447,19 @@ That means:
 The orchestrator creates clients lazily on first use and keeps one managed
 client per canonical role until `close()` or context-manager exit.
 
+### Explicit local preload
+
+`await orchestrator.load_all()` pre-opens configured local roles in parallel
+and reuses those clients for later requests. Pass `max_parallel=1` for
+sequential warmup or `max_parallel=2` for staggered batches when GPU headroom
+is tight.
+
 ## Constraints and Notes
 
 - This package is orchestration-only. It does not aggregate model outputs.
 - Only configured aliases are valid targets; unknown aliases raise `KeyError`.
-- Sync wrappers use `asyncio.run(...)` and fail inside an already-running event loop.
+- Sync wrappers use `asyncio.run(...)`, fail inside an already-running event loop,
+  and close managed clients before each sync call returns.
 - Request defaults are merged into the outgoing `PromptRequest`; explicit request values win.
 - If you want different provider settings per role, define separate `ModelSpec`
   entries with distinct `ProviderConfig` values.

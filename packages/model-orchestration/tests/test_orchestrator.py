@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -137,7 +138,7 @@ def test_default_local_vllm_config_uses_benchmark_aligned_params_and_distinct_po
     assert qa_params[LOCAL_LAUNCH_IMAGE] == "vllm-openai_latest.sif"
     assert qa_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] == 600.0
     assert qa_params[LOCAL_LAUNCH_MAX_MODEL_LEN] == "8192"
-    assert qa_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] == 0.33
+    assert qa_params[LOCAL_LAUNCH_GPU_MEMORY_UTILIZATION] == LocalVLLMPresetConfig().gpu_memory_utilization
     assert qa_params[LOCAL_LAUNCH_QUANTIZATION] == "compressed-tensors"
     assert LOCAL_LAUNCH_BIND in qa_params
 
@@ -317,12 +318,12 @@ async def test_default_local_vllm_roles_resolve_to_distinct_ports_and_aliases_re
         await orchestrator.fever_client.get_response(user_prompt="fever")
 
     assert resolver_events == [
-        ("enter", "google/gemma-2-9b-it", 8100),
-        ("enter", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", 8101),
-        ("enter", "Qwen/Qwen2.5-14B-Instruct", 8102),
-        ("exit", "google/gemma-2-9b-it", 8100),
-        ("exit", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", 8101),
-        ("exit", "Qwen/Qwen2.5-14B-Instruct", 8102),
+        ("enter", "task-aware-llm-council/gemma-2-9b-it-GPTQ", 8100),
+        ("enter", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2", 8101),
+        ("enter", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2", 8102),
+        ("exit", "task-aware-llm-council/gemma-2-9b-it-GPTQ", 8100),
+        ("exit", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2", 8101),
+        ("exit", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2", 8102),
     ]
     assert len(created_clients) == 3
     assert [config.api_base for config in built_configs] == [
@@ -331,6 +332,259 @@ async def test_default_local_vllm_roles_resolve_to_distinct_ports_and_aliases_re
         "http://127.0.0.1:8102/v1/chat/completions",
     ]
     assert all(client.closed for client in created_clients)
+
+
+@pytest.mark.asyncio
+async def test_load_all_preloads_local_roles_in_parallel() -> None:
+    resolver_events: list[tuple[str, str]] = []
+    created_clients: list[FakeClient] = []
+    started_models: list[str] = []
+    release = asyncio.Event()
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        started_models.append(model)
+        resolver_events.append(("enter", model))
+        if len(started_models) == 3:
+            release.set()
+        await release.wait()
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+        resolver_events.append(("exit", model))
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    async with ModelOrchestrator(
+        build_default_local_vllm_orchestrator_config(
+            preset=LocalVLLMPresetConfig(base_port=8200)
+        ),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    ) as orchestrator:
+        await asyncio.wait_for(orchestrator.load_all(), timeout=0.5)
+
+    assert started_models == [
+        "task-aware-llm-council/gemma-2-9b-it-GPTQ",
+        "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2",
+        "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2",
+    ]
+    assert resolver_events == [
+        ("enter", "task-aware-llm-council/gemma-2-9b-it-GPTQ"),
+        ("enter", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"),
+        ("enter", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"),
+        ("exit", "task-aware-llm-council/gemma-2-9b-it-GPTQ"),
+        ("exit", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"),
+        ("exit", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"),
+    ]
+    assert len(created_clients) == 3
+    assert all(client.closed for client in created_clients)
+
+
+@pytest.mark.asyncio
+async def test_load_all_supports_staggered_batches() -> None:
+    created_clients: list[FakeClient] = []
+    active_loads = 0
+    peak_loads = 0
+    started_models: list[str] = []
+    first_batch_ready = asyncio.Event()
+    release_all = asyncio.Event()
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        nonlocal active_loads, peak_loads
+        active_loads += 1
+        peak_loads = max(peak_loads, active_loads)
+        started_models.append(model)
+        if len(started_models) == 2:
+            first_batch_ready.set()
+        await release_all.wait()
+        active_loads -= 1
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    async with ModelOrchestrator(
+        build_default_local_vllm_orchestrator_config(),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    ) as orchestrator:
+        task = asyncio.create_task(orchestrator.load_all(max_parallel=2))
+        await asyncio.wait_for(first_batch_ready.wait(), timeout=0.5)
+        assert started_models == [
+            "task-aware-llm-council/gemma-2-9b-it-GPTQ",
+            "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2",
+        ]
+        release_all.set()
+        await asyncio.wait_for(task, timeout=0.5)
+
+    assert peak_loads == 2
+    assert started_models == [
+        "task-aware-llm-council/gemma-2-9b-it-GPTQ",
+        "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2",
+        "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2",
+    ]
+    assert len(created_clients) == 3
+    assert all(client.closed for client in created_clients)
+
+
+@pytest.mark.asyncio
+async def test_load_all_supports_sequential_batches() -> None:
+    created_clients: list[FakeClient] = []
+    started_models: list[str] = []
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        started_models.append(model)
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    async with ModelOrchestrator(
+        build_default_local_vllm_orchestrator_config(),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    ) as orchestrator:
+        await orchestrator.load_all(max_parallel=1)
+
+    assert started_models == [
+        "task-aware-llm-council/gemma-2-9b-it-GPTQ",
+        "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2",
+        "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2",
+    ]
+    assert len(created_clients) == 3
+    assert all(client.closed for client in created_clients)
+
+
+@pytest.mark.asyncio
+async def test_load_all_deduplicates_aliases_and_is_idempotent() -> None:
+    resolver_events: list[tuple[str, str]] = []
+    created_clients: list[FakeClient] = []
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        resolver_events.append(("enter", model))
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+        resolver_events.append(("exit", model))
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    async with ModelOrchestrator(
+        build_default_local_vllm_orchestrator_config(),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    ) as orchestrator:
+        await orchestrator.load_all(("math", "reasoning", "fever"), max_parallel=1)
+        await orchestrator.load_all(("reasoning", "general"), max_parallel=2)
+
+    assert resolver_events == [
+        ("enter", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"),
+        ("enter", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"),
+        ("exit", "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"),
+        ("exit", "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"),
+    ]
+    assert len(created_clients) == 2
+    assert all(client.closed for client in created_clients)
+
+
+@pytest.mark.asyncio
+async def test_load_all_is_noop_for_http_provider() -> None:
+    built_configs: list[ProviderConfig] = []
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        built_configs.append(provider_config)
+        return FakeClient(provider_config)
+
+    async with ModelOrchestrator(
+        _config(provider=Provider.OPENAI_COMPATIBLE),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+    ) as orchestrator:
+        await orchestrator.load_all(max_parallel=2)
+
+    assert built_configs == []
+
+
+@pytest.mark.asyncio
+async def test_load_all_closes_clients_opened_before_later_batch_failure() -> None:
+    resolver_events: list[tuple[str, str]] = []
+    created_clients: list[FakeClient] = []
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        resolver_events.append(("enter", model))
+        if model == "general-model":
+            raise RuntimeError("boom:general-model")
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+        resolver_events.append(("exit", model))
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    async with ModelOrchestrator(
+        _config(provider=Provider.LOCAL),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    ) as orchestrator:
+        with pytest.raises(RuntimeError, match="boom:general-model"):
+            await orchestrator.load_all(max_parallel=2)
+
+        assert all(client.closed for client in created_clients)
+
+    assert resolver_events == [
+        ("enter", "qa-model"),
+        ("enter", "reasoning-model"),
+        ("enter", "general-model"),
+        ("exit", "reasoning-model"),
+        ("exit", "qa-model"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_load_all_rejects_invalid_max_parallel() -> None:
+    async with ModelOrchestrator(
+        build_default_local_vllm_orchestrator_config(),
+        recorder=InMemoryRecorder(),
+    ) as orchestrator:
+        with pytest.raises(ValueError, match="max_parallel must be a positive integer"):
+            await orchestrator.load_all(max_parallel=0)
 
 
 @pytest.mark.unit
@@ -374,6 +628,43 @@ def test_sync_wrapper_returns_response() -> None:
     assert response.target == "qa"
     assert response.text == "response:qa-model"
     assert created_clients[0].requests[0].user_prompt == "hello"
+    assert created_clients[0].closed is True
+
+
+def test_sync_wrapper_closes_local_provider_context() -> None:
+    resolver_events: list[tuple[str, str, str | None]] = []
+    created_clients: list[FakeClient] = []
+
+    @asynccontextmanager
+    async def fake_resolver(provider_config: ProviderConfig, *, model: str):
+        resolver_events.append(("enter", model, provider_config.api_base))
+        resolved = replace(
+            provider_config,
+            api_base=f"http://localhost/{model}/v1/chat/completions",
+        )
+        yield ResolvedProviderHandle(provider_config=resolved, close=_noop_close)
+        resolver_events.append(("exit", model, resolved.api_base))
+
+    def client_builder(provider_config: ProviderConfig) -> FakeClient:
+        client = FakeClient(provider_config)
+        created_clients.append(client)
+        return client
+
+    orchestrator = ModelOrchestrator(
+        _config(provider=Provider.LOCAL),
+        recorder=InMemoryRecorder(),
+        client_builder=client_builder,
+        provider_config_resolver=fake_resolver,
+    )
+
+    response = orchestrator.qa_client.get_response_sync(user_prompt="local sync")
+
+    assert response.provider_mode == "local"
+    assert resolver_events == [
+        ("enter", "qa-model", None),
+        ("exit", "qa-model", "http://localhost/qa-model/v1/chat/completions"),
+    ]
+    assert created_clients[0].closed is True
 
 
 async def _noop_close() -> None:
