@@ -124,6 +124,7 @@ from model_orchestration import (
 config = build_default_local_vllm_orchestrator_config()
 
 async with ModelOrchestrator(config) as orchestrator:
+    await orchestrator.load_all(max_parallel=2)
     qa = await orchestrator.qa_client.get_response(user_prompt="Answer this.")
     math = await orchestrator.math_client.get_response(user_prompt="Solve this.")
     general = await orchestrator.general_client.get_response(user_prompt="Check this claim.")
@@ -134,46 +135,38 @@ This creates one local vLLM-backed client per canonical role:
 - `qa` on port `8000`
 - `reasoning` on port `8001`
 - `general` on port `8002`
-- `synthesizer` on port `8003`
 
 Aliases reuse the canonical client:
 
 - `math` and `code` reuse `reasoning`
 - `fever` reuses `general`
 
+Use `await orchestrator.load_all()` when you want all configured local vLLM
+roles to start in parallel before the first request. Pass
+`max_parallel=2` to stagger startup in batches. For non-local/API-backed
+providers, `load_all()` is a no-op.
+
 ## Default Role Mapping
 
-`build_default_orchestrator_config(...)` creates four canonical roles:
+`build_default_orchestrator_config(...)` creates three canonical roles:
 
 - `qa` -> `google/gemma-2-9b-it`
 - `reasoning` -> `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`
 - `general` -> `Qwen/Qwen2.5-14B-Instruct`
-- `synthesizer` -> `Qwen/Qwen2.5-32B-Instruct`
 
 Default aliases:
 
 - `qa`
 - `reasoning`, `math`, `code`
 - `general`, `fever`
-- `synthesizer`
 
-The default role is `general`. The `synthesizer` role is the P3/P4 fan-out
-referee — it is invoked only by `council_policies.synthesis.synthesize()`
-and is intentionally excluded from `council_policies.models.TASK_TO_ROLE`,
-so rule-based routing can never dispatch a user task to it.
+The default role is `general`.
 
 When local vLLM mode is used, the package assigns deterministic ports by role:
 
 - `qa` -> `base_port + 0`
 - `reasoning` -> `base_port + 1`
 - `general` -> `base_port + 2`
-- `synthesizer` -> `base_port + 3`
-
-> **Memory note.** The default local preset assumes all four roles can
-> co-reside (`gpu_memory_utilization=0.33` per role). On single-GPU setups
-> where that budget is too tight, use `ModelOrchestrator.fanout([...])` —
-> see [FanoutSession](#fanoutsession-swap-safe-multi-role-dispatch) — to
-> serialize loads and raise `gpu_memory_utilization` in the preset.
 
 You can override the concrete model ids without changing caller code:
 
@@ -182,7 +175,6 @@ config = build_default_orchestrator_config(
     qa_model="Qwen/Qwen2.5-7B-Instruct",
     reasoning_model="deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
     general_model="google/gemma-2-9b-it",
-    synthesizer_model="Qwen/Qwen2.5-14B-Instruct",
 )
 ```
 
@@ -298,7 +290,6 @@ Important methods and attributes:
 - `get_client(alias)`
 - `run(request, target=...)`
 - `run_sync(request=None, target=..., ...)`
-- `fanout([roles...])` — see below
 - `build_prompt_request(...)`
 - `close()`
 - `qa_client`
@@ -314,37 +305,6 @@ Use it as an async context manager when possible:
 async with ModelOrchestrator(config) as orchestrator:
     ...
 ```
-
-### FanoutSession: swap-safe multi-role dispatch
-
-`orchestrator.fanout([...])` returns an async context manager that scopes a
-multi-role call sequence. Within the session, only one role's weights are
-resident at a time — the session swaps on role change by tearing down the
-previous role's client (including its vLLM container lifecycle) before
-opening the next.
-
-```python
-async with orchestrator.fanout(["qa", "reasoning", "synthesizer"]) as session:
-    qa_responses       = await session.run_role("qa", [request])
-    reasoning_responses = await session.run_role("reasoning", [request])
-    synth_responses    = await session.run_role("synthesizer", [synthesis_request])
-```
-
-Semantics:
-
-- **Strict declaration.** Calling a role not declared at open raises
-  `ValueError`. Aliases canonicalize (declaring `"reasoning"` admits
-  `"math"` and `"code"`).
-- **Unknown role at open** raises `KeyError` *before* any model is loaded.
-- **Unload-on-error.** If the session exits via exception, the currently-
-  resident role is torn down so the next session starts cold.
-- **Batch-first.** `run_role` takes a list of `PromptRequest`s so multiple
-  prompts amortize one load; pass a single-element list for one-shot use.
-
-Use this whenever multiple specialist models cannot co-reside on the
-available GPU (e.g., single-A40 deployments). For API-backed or multi-GPU
-setups where concurrency is cheap, prefer `get_client(...)` directly —
-`FanoutSession` serializes unconditionally.
 
 ### `OrchestratedModelClient`
 
@@ -487,11 +447,19 @@ That means:
 The orchestrator creates clients lazily on first use and keeps one managed
 client per canonical role until `close()` or context-manager exit.
 
+### Explicit local preload
+
+`await orchestrator.load_all()` pre-opens configured local roles in parallel
+and reuses those clients for later requests. Pass `max_parallel=1` for
+sequential warmup or `max_parallel=2` for staggered batches when GPU headroom
+is tight.
+
 ## Constraints and Notes
 
 - This package is orchestration-only. It does not aggregate model outputs.
 - Only configured aliases are valid targets; unknown aliases raise `KeyError`.
-- Sync wrappers use `asyncio.run(...)` and fail inside an already-running event loop.
+- Sync wrappers use `asyncio.run(...)`, fail inside an already-running event loop,
+  and close managed clients before each sync call returns.
 - Request defaults are merged into the outgoing `PromptRequest`; explicit request values win.
 - If you want different provider settings per role, define separate `ModelSpec`
   entries with distinct `ProviderConfig` values.

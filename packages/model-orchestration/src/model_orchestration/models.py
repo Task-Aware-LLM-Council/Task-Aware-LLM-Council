@@ -22,7 +22,7 @@ class LocalVLLMPresetConfig:
     bind: str | None = None
     startup_timeout_seconds: float = 600.0
     max_model_len: str = "8192"
-    gpu_memory_utilization: float = 0.33
+    gpu_memory_utilization: float = 0.30       
     quantization: str = "compressed-tensors"
     use_gpu: bool = True
     client_host: str | None = None

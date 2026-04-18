@@ -9,7 +9,6 @@ from typing import Any, Callable
 from llm_gateway import BaseLLMClient, PromptRequest
 
 from model_orchestration.client import OrchestratedModelClient
-from model_orchestration.fanout import FanoutSession
 from model_orchestration.models import (
     ModelSpec,
     OrchestratorCallRecord,
@@ -44,6 +43,10 @@ class _ManagedRoleClient:
             await self._ensure_open()
         return await self._client.generate(request)
 
+    @property
+    def is_open(self) -> bool:
+        return self._client is not None
+
     async def close(self) -> None:
         if self._client is not None:
             await self._client.close()
@@ -53,12 +56,12 @@ class _ManagedRoleClient:
             self._handle_context = None
         self._resolved_provider = self.spec.provider_config
 
-    async def _ensure_open(self) -> None:
+    async def _ensure_open(self) -> bool:
         if self._client is not None:
-            return
+            return False
         async with self._open_lock:
             if self._client is not None:
-                return
+                return False
             handle_context = self._provider_config_resolver(
                 self.spec.provider_config,
                 model=self.spec.model,
@@ -71,6 +74,7 @@ class _ManagedRoleClient:
                 await handle_context.__aexit__(None, None, None)
                 raise
             self._handle_context = handle_context
+            return True
 
 
 class ModelOrchestrator:
@@ -110,20 +114,33 @@ class ModelOrchestrator:
         self._require_alias(alias)
         return OrchestratedModelClient(self, alias)
 
-    def fanout(self, roles: list[str] | tuple[str, ...]) -> FanoutSession:
-        """Open a scoped fan-out session over `roles`.
+    async def load_all(
+        self,
+        targets: tuple[str, ...] | None = None,
+        *,
+        max_parallel: int | None = None,
+    ) -> None:
+        print(f"Load all called with maxParallel={max_parallel}")
+        managed_clients = self._managed_clients_for_targets(targets)
+        if not managed_clients:
+            return
 
-        Use with `async with`:
+        if max_parallel is not None and max_parallel <= 0:
+            raise ValueError("max_parallel must be a positive integer")
 
-            async with orchestrator.fanout(["qa", "reasoning", "general"]) as session:
-                qa_out = await session.run_role("qa", [req])
-                ...
+        batch_size = len(managed_clients) if max_parallel is None else max_parallel
+        opened_during_call: list[_ManagedRoleClient] = []
 
-        Roles are canonicalized via the alias table; passing an unknown
-        alias raises KeyError at open time (before any model is loaded).
-        """
-        canonical = frozenset(self._canonical_role(role) for role in roles)
-        return FanoutSession(self, canonical)
+        try:
+            for batch_start in range(0, len(managed_clients), batch_size):
+                opened_now = await self._open_managed_client_batch(
+                    managed_clients[batch_start:batch_start + batch_size]
+                )
+                opened_during_call.extend(opened_now)
+        except Exception:
+            for managed_client in reversed(opened_during_call):
+                await managed_client.close()
+            raise
 
     async def run(
         self,
@@ -230,11 +247,24 @@ class ModelOrchestrator:
         )
         if isinstance(request, OrchestratorRequest):
             normalized_request = request
-        return _run_sync(self.run(normalized_request or request, target=target))
+        return _run_sync(self._run_sync_once(normalized_request or request, target=target))
 
     async def close(self) -> None:
         for managed_client in self._managed_clients.values():
             await managed_client.close()
+
+    async def _run_sync_once(
+        self,
+        request: PromptRequest | OrchestratorRequest,
+        *,
+        target: str | None = None,
+    ) -> OrchestratorResponse:
+        # Sync wrappers use a dedicated event loop per call, so any managed async
+        # resources must be closed before that loop is torn down.
+        try:
+            return await self.run(request, target=target)
+        finally:
+            await self.close()
 
     def build_prompt_request(
         self,
@@ -288,6 +318,49 @@ class ModelOrchestrator:
             )
             self._managed_clients[role] = managed
         return managed
+
+    def _managed_clients_for_targets(
+        self,
+        targets: tuple[str, ...] | None,
+    ) -> list[_ManagedRoleClient]:
+        if targets is None:
+            roles = tuple(self._role_specs)
+        else:
+            roles = tuple(dict.fromkeys(self._canonical_role(alias) for alias in targets))
+
+        managed_clients: list[_ManagedRoleClient] = []
+        for role in roles:
+            if _provider_name(self._role_specs[role].provider_config.provider) != "local":
+                continue
+            managed_clients.append(self._managed_client_for(role))
+        return managed_clients
+
+    async def _open_managed_client_batch(
+        self,
+        managed_clients: list[_ManagedRoleClient],
+    ) -> list[_ManagedRoleClient]:
+        results = await asyncio.gather(
+            *(managed_client._ensure_open() for managed_client in managed_clients),
+            return_exceptions=True,
+        )
+
+        opened_now: list[_ManagedRoleClient] = []
+        first_error: Exception | None = None
+
+        for managed_client, result in zip(managed_clients, results, strict=True):
+            if isinstance(result, Exception):
+                if first_error is None:
+                    first_error = result
+                continue
+            if result:
+                opened_now.append(managed_client)
+
+        if first_error is None:
+            return opened_now
+
+        for managed_client in reversed(opened_now):
+            await managed_client.close()
+        raise first_error
 
     def _normalize_run_request(
         self,
@@ -362,7 +435,7 @@ def _utc_now() -> str:
 
 def _run_sync(coro):
     try:
-        asyncio.get_running_loop()
+        asyncio.build_prompt_request()
     except RuntimeError:
         return asyncio.run(coro)
     raise RuntimeError("Sync orchestration APIs cannot run inside an active event loop")

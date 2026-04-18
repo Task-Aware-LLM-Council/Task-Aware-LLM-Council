@@ -32,13 +32,14 @@ from model_orchestration.models import (
 )
 
 
-DEFAULT_QA_MODEL = "google/gemma-2-9b-it"
-DEFAULT_REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
-DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-14B-Instruct"
-# Synthesizer is the council referee: fuses specialist partials on P3/P4
-# multi-skill dispatch. Must be distinct from the specialist models to avoid
-# the self-bias failure mode (see scratch/plan_dedicated_synthesizer.md).
-DEFAULT_SYNTHESIZER_MODEL = "Qwen/Qwen2.5-32B-Instruct"
+API_DEFAULT_QA_MODEL = "google/gemma-2-9b-it"
+API_DEFAULT_REASONING_MODEL = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+API_DEFAULT_GENERAL_MODEL = "Qwen/Qwen2.5-14B-Instruct"
+
+vLLM_DEFAULT_QA_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
+vLLM_DEFAULT_REASONING_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
+vLLM_DEFAULT_GENERAL_MODEL = "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
+
 DEFAULT_LOCAL_VLLM_BIND = f"/scratch1/{get_current_user()}/.cache"
 
 
@@ -48,10 +49,9 @@ def build_default_orchestrator_config(
     api_base: str | None = None,
     api_key_env: str | None = None,
     provider_defaults: dict[str, object] | None = None,
-    qa_model: str = DEFAULT_QA_MODEL,
-    reasoning_model: str = DEFAULT_REASONING_MODEL,
-    general_model: str = DEFAULT_GENERAL_MODEL,
-    synthesizer_model: str = DEFAULT_SYNTHESIZER_MODEL,
+    qa_model: str = API_DEFAULT_QA_MODEL,
+    reasoning_model: str = API_DEFAULT_REASONING_MODEL,
+    general_model: str = API_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
 ) -> OrchestratorConfig:
@@ -61,7 +61,6 @@ def build_default_orchestrator_config(
             qa_model=qa_model,
             reasoning_model=reasoning_model,
             general_model=general_model,
-            synthesizer_model=synthesizer_model,
             recording=recording,
             mode_label=mode_label,
             preset=LocalVLLMPresetConfig(provider_defaults=dict(provider_defaults or {})),
@@ -110,22 +109,6 @@ def build_default_orchestrator_config(
                     provider_defaults=provider_defaults,
                 ),
             ),
-            ModelSpec(
-                role="synthesizer",
-                model=synthesizer_model,
-                aliases=("synthesizer",),
-                description=(
-                    "Referee role for P3/P4 multi-skill dispatch. Fuses "
-                    "specialist partials; excluded from TASK_TO_ROLE by design."
-                ),
-                provider_config=_provider_config(
-                    provider=provider,
-                    api_base=api_base,
-                    api_key_env=api_key_env,
-                    model=synthesizer_model,
-                    provider_defaults=provider_defaults,
-                ),
-            ),
         ),
         default_role="general",
         recording=recording,
@@ -135,10 +118,9 @@ def build_default_orchestrator_config(
 
 def build_default_local_vllm_orchestrator_config(
     *,
-    qa_model: str = DEFAULT_QA_MODEL,
-    reasoning_model: str = DEFAULT_REASONING_MODEL,
-    general_model: str = DEFAULT_GENERAL_MODEL,
-    synthesizer_model: str = DEFAULT_SYNTHESIZER_MODEL,
+    qa_model: str = vLLM_DEFAULT_QA_MODEL,
+    reasoning_model: str = vLLM_DEFAULT_REASONING_MODEL,
+    general_model: str = vLLM_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
     preset: LocalVLLMPresetConfig | None = None,
@@ -172,13 +154,6 @@ def build_default_local_vllm_orchestrator_config(
         ("qa", qa_model, ("qa",), "Question-answering specialist.", 0),
         ("reasoning", reasoning_model, ("reasoning", "math", "code"), "Math and code specialist.", 1),
         ("general", general_model, ("general", "fever"), "Strong generalist and FEVER-oriented model.", 2),
-        (
-            "synthesizer",
-            synthesizer_model,
-            ("synthesizer",),
-            "Referee role for P3/P4 multi-skill dispatch; excluded from TASK_TO_ROLE.",
-            3,
-        ),
     )
 
     return OrchestratorConfig(

@@ -99,7 +99,7 @@ def main():
 
     safe_model_name = args.model.replace('/', '_')
     temp_dir = f"{args.temp_dir}/{safe_model_name}"
-    print(f"--- Starting AWQ Quantization for {args.model} using llm-compressor, temp dir {temp_dir} ---")
+    print(f"--- Starting Quantization for {args.model} using llm-compressor, temp dir {temp_dir} ---")
 
 
     # Dynamically determine the sequential target from the HF config
@@ -127,24 +127,6 @@ def main():
             print(f"Found mappings for key:{architecture_name},\nmappings:{mappings}")
         print(f"--- Starting 4-bit (AWQ) Quantization for {args.model} ---")
         recipe = [
-            # Specific TO Gemma-2-9b0it
-            #TODO: Make this properly configurable
-            # AWQModifier(
-            #     ignore=["lm_head"],
-            #     mappings=mappings,
-            #     config_groups={
-            #         "group_0": {
-            #             "targets": ["Linear"],
-            #             "weights": {
-            #                 "num_bits": 4,
-            #                 "type": "int",
-            #                 "symmetric": True,  # <-- Forces Symmetric
-            #                 "strategy": "group",
-            #                 "group_size": 64    # <-- Lowered from 128 to recover accuracy
-            #             }
-            #         }
-            #     }
-            # )
             AWQModifier(
                 targets=["Linear"], 
                 scheme="W4A16_ASYM", 
@@ -201,7 +183,7 @@ def main():
         api.upload_folder(
             folder_path=temp_dir,
             repo_id=args.repo_id,
-            commit_message=f"Upload AWQ {args.bits}-bit quantization of {args.model} via llm-compressor"
+            commit_message=f"Upload {args.bits}-bit quantization of {args.model} via llm-compressor"
         )
     else:
         print("--- Skipping Upload to Hugging Face ---")
