@@ -35,6 +35,13 @@ from task_eval.scoring import (
     token_f1_multi,
     math_exact_match
 )
+from .metrics_analysis import (
+    find_prediction_files,
+    load_predictions,
+    group_by_example,
+    avg_tokens_per_question,
+    avg_calls_per_question,
+)
 
 __all__ = [
     "DatasetProfile",
