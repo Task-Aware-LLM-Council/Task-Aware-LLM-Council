@@ -204,7 +204,8 @@ class RuleBasedRoutingPolicy:
                     metadata={
                         "routed_role": routed_role,
                         "synthesizer_role": self.synthesizer_role,
-                        "synthesis_skipped": getattr(result, "skipped", None),
+                        "synthesis_short_circuit": result.metadata.get("short_circuit"),
+                        "synthesis_used_fallback": result.used_fallback,
                     },
                 )
             except Exception as exc:  # pragma: no cover
