@@ -8,14 +8,15 @@ Environment variables:
     OPENROUTER_API_KEY   — for OpenRouter provider
     OPENAI_API_KEY       — for OpenAI provider
     HUGGINGFACE_API_KEY  — for HuggingFace provider
+    NVIDIA_API_KEY       — for NVIDIA NIM provider
 
 Optional CLI args:
-    --provider       openrouter | openai | huggingface   (default: openrouter)
+    --provider       openrouter | openai | huggingface | nvidia   (default: openrouter)
     --qa-model       model name for qa role
     --reasoning-model model name for reasoning role
     --general-model  model name for general role
-    --n-per-dataset  questions per dataset               (default: 5)
-    --output         path to save results JSON           (default: p2_results.json)
+    --n-per-dataset  questions per dataset                        (default: 5)
+    --output         path to save results JSON                    (default: p2_results.json)
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ from council_policies.p2_policy import DatasetCouncilPolicy, P2PolicyResult
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
+_NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1/chat/completions"
+
 _DEFAULT_MODELS = {
     Provider.OPENROUTER: {
         "qa": "meta-llama/llama-3.1-8b-instruct",
@@ -51,24 +54,32 @@ _DEFAULT_MODELS = {
         "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
         "general": "Qwen/Qwen2.5-72B-Instruct",
     },
+    Provider.OPENAI_COMPATIBLE: {
+        "qa": "meta/llama-3.1-8b-instruct",
+        "reasoning": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "general": "meta/llama-3.3-70b-instruct",
+    },
 }
 
 _API_KEY_ENV = {
     Provider.OPENROUTER: "OPENROUTER_API_KEY",
     Provider.OPENAI: "OPENAI_API_KEY",
     Provider.HUGGINGFACE: "HUGGINGFACE_API_KEY",
+    Provider.OPENAI_COMPATIBLE: "NVIDIA_API_KEY",
 }
 
 _PROVIDER_MAP = {
     "openrouter": Provider.OPENROUTER,
     "openai": Provider.OPENAI,
     "huggingface": Provider.HUGGINGFACE,
+    "nvidia": Provider.OPENAI_COMPATIBLE,
 }
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the P2 Dataset Council Policy")
     parser.add_argument("--provider", default="openrouter", choices=list(_PROVIDER_MAP))
+    parser.add_argument("--api-base", default=None, help="Override API base URL (auto-set for nvidia)")
     parser.add_argument("--qa-model", default=None)
     parser.add_argument("--reasoning-model", default=None)
     parser.add_argument("--general-model", default=None)
@@ -129,9 +140,11 @@ def _save_results(result: P2PolicyResult, args: argparse.Namespace) -> None:
 async def _run(args: argparse.Namespace) -> None:
     provider = _PROVIDER_MAP[args.provider]
     defaults = _DEFAULT_MODELS[provider]
+    api_base = args.api_base or (_NVIDIA_API_BASE if args.provider == "nvidia" else None)
 
     config = build_default_orchestrator_config(
         provider=provider,
+        api_base=api_base,
         api_key_env=_API_KEY_ENV[provider],
         qa_model=args.qa_model or defaults["qa"],
         reasoning_model=args.reasoning_model or defaults["reasoning"],

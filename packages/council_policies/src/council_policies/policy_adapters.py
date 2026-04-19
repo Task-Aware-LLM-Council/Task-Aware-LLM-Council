@@ -21,10 +21,13 @@ from council_policies.policy_runner import (
     orchestrator_to_prompt_response,
 )
 from council_policies.prompts import (
+    RATER_SYSTEM_PROMPT,
     TIEBREAK_SYSTEM_PROMPT,
     VOTER_SYSTEM_PROMPT,
+    build_rating_prompt,
     build_tiebreak_prompt,
     build_voter_prompt,
+    parse_ratings,
     parse_vote,
 )
 from council_policies.router import DispatchRun, Router, RoutingDecision, Subtask
@@ -33,6 +36,8 @@ from council_policies.decomposer import Decomposer, PassthroughDecomposer
 
 
 _VOTE_LABELS = list("ABCDEFGHIJ")
+_RATING_LABELS = ("A", "B", "C")
+_MAX_ANSWER_CHARS = 2000
 
 
 class P3Adapter(BasePolicyAdapter):
@@ -380,3 +385,149 @@ class P2PromptAdapter(BasePolicyAdapter):
         if winning_label is None:
             return leaders[0], tally
         return label_to_key[winning_label], tally
+
+
+class P2DatasetAdapter(BasePolicyAdapter):
+    """
+    Adapter that plugs the P2 blind peer-review rating policy into
+    CouncilBenchmarkRunner.
+
+    Phase 1 (plan + execute_specialist_requests):
+        Fan out the question to all council roles in parallel — same as
+        P2PromptAdapter but without voting.
+
+    Phase 2 (complete_specialist_phase):
+        Each model rates all answers 1-10 using shuffled A/B/C labels
+        (anti-bias: each rater sees its own answer under a different label).
+
+    Phase 3 (finalize):
+        Average scores per role across all raters → return the answer with
+        the highest average score.
+    """
+
+    policy_id = "p2_dataset"
+
+    def __init__(
+        self,
+        *,
+        council_roles: tuple[str, ...] = ("qa", "reasoning", "general"),
+        seed: int = 42,
+    ) -> None:
+        self.council_roles = council_roles
+        self._rng = random.Random(seed)
+
+    async def plan(
+        self,
+        request: PromptRequest,
+        runtime: PolicyRuntime,
+    ) -> PolicyExecutionState:
+        specialist_requests: list[SpecialistRequest] = []
+        for role in self.council_roles:
+            if not runtime.has_specialist_role(role):
+                continue
+            cache_key = build_specialist_cache_key(
+                self.policy_id, request, role, phase="specialist"
+            )
+            specialist_requests.append(
+                SpecialistRequest(cache_key=cache_key, role=role, request=request)
+            )
+
+        if not specialist_requests:
+            raise ValueError("P2DatasetAdapter: no registered council roles found")
+
+        return PolicyExecutionState(
+            policy_id=self.policy_id,
+            request=request,
+            specialist_requests=specialist_requests,
+            metadata={
+                "council_roles": [r.role for r in specialist_requests],
+                "candidate_cache_keys": [r.cache_key for r in specialist_requests],
+                "scores_by_role": {},
+                "winner_role": None,
+            },
+        )
+
+    async def complete_specialist_phase(
+        self,
+        state: PolicyExecutionState,
+        cache: SpecialistCache,
+        runtime: PolicyRuntime,
+    ) -> PolicyExecutionState:
+        roles = state.metadata["council_roles"]
+        cache_keys = state.metadata["candidate_cache_keys"]
+
+        # Build answer texts from cache
+        answers: dict[str, str] = {}
+        for role, key in zip(roles, cache_keys):
+            if cache.has(key):
+                text = cache.get(key).text.strip()
+                answers[role] = (
+                    text[:_MAX_ANSWER_CHARS] + "…[truncated]"
+                    if len(text) > _MAX_ANSWER_CHARS else text
+                ) if text else "[NO RESPONSE]"
+            else:
+                answers[role] = "[NO RESPONSE]"
+
+        question = (state.request.user_prompt or "")[:500] or "(no question text)"
+
+        # Each rater gets a differently shuffled A/B/C mapping (anti-bias)
+        role_score_lists: dict[str, list[float]] = {role: [] for role in roles}
+
+        for rater_index, rater_role in enumerate(roles):
+            local_rng = random.Random(self._rng.random() + rater_index * 1_000_003)
+            order = list(range(len(roles)))
+            local_rng.shuffle(order)
+
+            labeled_answers: dict[str, str] = {}
+            label_to_role: dict[str, str] = {}
+            for label, idx in zip(_RATING_LABELS, order):
+                labeled_answers[label] = answers[roles[idx]]
+                label_to_role[label] = roles[idx]
+
+            rating_request = PromptRequest(
+                system_prompt=RATER_SYSTEM_PROMPT,
+                user_prompt=build_rating_prompt(question, labeled_answers),
+            )
+
+            try:
+                response = await runtime.execute_vote_request(
+                    role=rater_role, request=rating_request
+                )
+                scores = parse_ratings(response.text.strip(), list(_RATING_LABELS))
+                if scores:
+                    for label, score in scores.items():
+                        role = label_to_role[label]
+                        role_score_lists[role].append(score)
+            except Exception:
+                pass  # rater failed — skip, others continue
+
+        avg_scores = {
+            role: sum(s) / len(s)
+            for role, s in role_score_lists.items()
+            if s
+        }
+        winner_role = max(avg_scores, key=lambda r: avg_scores[r]) if avg_scores else roles[0]
+
+        state.metadata["scores_by_role"] = avg_scores
+        state.metadata["winner_role"] = winner_role
+        winner_key = cache_keys[roles.index(winner_role)]
+        state.winner_response = cache.get(winner_key) if cache.has(winner_key) else None
+        return state
+
+    async def finalize(
+        self,
+        state: PolicyExecutionState,
+        cache: SpecialistCache,
+        runtime: PolicyRuntime,
+    ) -> PolicyResult:
+        del cache, runtime
+        if state.winner_response is None:
+            raise RuntimeError("P2DatasetAdapter: no winner response after rating phase")
+        return make_policy_result(
+            state,
+            response=orchestrator_to_prompt_response(state.winner_response),
+            extra_metadata={
+                "scores_by_role": state.metadata["scores_by_role"],
+                "winner_role": state.metadata["winner_role"],
+            },
+        )

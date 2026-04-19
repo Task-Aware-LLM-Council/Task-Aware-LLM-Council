@@ -28,6 +28,7 @@ p4-training = [
 
 
 [project.scripts]
+council-p1 = "council_policies.p1_cli:main"
 council-p2 = "council_policies.run:main"
 council-p2-bench = "council_policies.bench_cli:main"
 

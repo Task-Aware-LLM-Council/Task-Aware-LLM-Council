@@ -36,6 +36,8 @@ from council_policies.p2_benchmark import run_p2_benchmark_suite
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
+_NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1/chat/completions"
+
 _DEFAULT_MODELS = {
     "openrouter": {
         "qa": "meta-llama/llama-3.1-8b-instruct",
@@ -52,18 +54,25 @@ _DEFAULT_MODELS = {
         "reasoning": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
         "general": "Qwen/Qwen2.5-72B-Instruct",
     },
+    "nvidia": {
+        "qa": "meta/llama-3.1-8b-instruct",
+        "reasoning": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "general": "meta/llama-3.3-70b-instruct",
+    },
 }
 
 _API_KEY_ENV = {
     "openrouter": "OPENROUTER_API_KEY",
     "openai": "OPENAI_API_KEY",
     "huggingface": "HUGGINGFACE_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
 }
 
 _PROVIDER_ENUM = {
     "openrouter": Provider.OPENROUTER,
     "openai": Provider.OPENAI,
     "huggingface": Provider.HUGGINGFACE,
+    "nvidia": Provider.OPENAI_COMPATIBLE,
 }
 
 _ALL_DATASETS = ("musique", "quality", "fever", "hardmath", "humaneval_plus")
@@ -72,6 +81,7 @@ _ALL_DATASETS = ("musique", "quality", "fever", "hardmath", "humaneval_plus")
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run P2 council benchmark (same datasets as P1)")
     parser.add_argument("--provider", default="openrouter", choices=list(_PROVIDER_ENUM))
+    parser.add_argument("--api-base", default=None, help="Override API base URL (auto-set for nvidia)")
     parser.add_argument("--qa-model", default=None)
     parser.add_argument("--reasoning-model", default=None)
     parser.add_argument("--general-model", default=None)
@@ -87,9 +97,11 @@ async def _run(args: argparse.Namespace) -> None:
     provider_name = args.provider
     defaults = _DEFAULT_MODELS[provider_name]
     provider = _PROVIDER_ENUM[provider_name]
+    api_base = args.api_base or (_NVIDIA_API_BASE if provider_name == "nvidia" else None)
 
     config = build_default_orchestrator_config(
         provider=provider,
+        api_base=api_base,
         api_key_env=_API_KEY_ENV[provider_name],
         qa_model=args.qa_model or defaults["qa"],
         reasoning_model=args.reasoning_model or defaults["reasoning"],
@@ -118,6 +130,7 @@ async def _run(args: argparse.Namespace) -> None:
             orchestrator,
             output_root=Path(args.output_root),
             n_per_dataset=args.n_per_dataset,
+            metric_resolver=lambda source: source,
         )
 
     print(f"\n=== P2 Benchmark Complete ===")

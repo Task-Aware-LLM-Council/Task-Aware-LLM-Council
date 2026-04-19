@@ -303,6 +303,7 @@ class HardMathProfile(BaseDatasetProfile):
     metric_names: tuple[str, ...] = ("math_exact_match",)
     primary_metric: str = "math_exact_match"
     dataset_name: str = "math-ai/MATH-500"
+    split: str = "test"
 
     def row_to_case(self, row: dict[str, Any], index: int) -> EvaluationCase:
         question = str(_first_present(row, "question", "problem", "prompt", default=""))
@@ -339,6 +340,7 @@ class HumanEvalPlusProfile(BaseDatasetProfile):
     metric_names: tuple[str, ...] = ("pass_at_1",)
     primary_metric: str = "pass_at_1"
     dataset_name: str = "openai/openai_humaneval"
+    split: str = "test"
     timeout_seconds: int = 10
 
     def row_to_case(self, row: dict[str, Any], index: int) -> EvaluationCase:
