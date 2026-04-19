@@ -369,6 +369,9 @@ name = "council-policies"
 version = "0.1.1"
 source = { editable = "packages/council_policies" }
 dependencies = [
+    { name = "benchmark-runner" },
+    { name = "benchmarking-pipeline" },
+    { name = "common" },
     { name = "llm-gateway" },
     { name = "model-orchestration" },
     { name = "task-eval" },
@@ -388,6 +391,9 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "benchmark-runner", editable = "packages/benchmark_runner" },
+    { name = "benchmarking-pipeline", editable = "packages/benchmarking_pipeline" },
+    { name = "common", editable = "packages/common" },
     { name = "datasets", marker = "extra == 'test'", specifier = ">=2.19" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "llm-gateway", editable = "packages/llm_gateway" },

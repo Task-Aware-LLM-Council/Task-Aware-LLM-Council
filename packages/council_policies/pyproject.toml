@@ -12,6 +12,9 @@ dependencies = [
 	"llm-gateway",
 	"model-orchestration",
 	"task-eval",
+	"benchmarking-pipeline",
+	"benchmark-runner",
+	"common",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +30,9 @@ p4-training = [
 ]
 
 
+[project.scripts]
+p3-policy = "council_policies.cli:main"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
@@ -35,6 +41,8 @@ llm-gateway = {workspace = true}
 model-orchestration = {workspace = true}
 task-eval = {workspace = true}
 benchmarking-pipeline = {workspace = true}
+benchmark-runner = {workspace = true}
+common = {workspace = true}
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]
