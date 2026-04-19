@@ -270,8 +270,6 @@ def extract_code_answer(response: str) -> str:
 
 
 def extract_answer(response: str, dataset_name: str) -> str:
-    print(
-        f"extract_answer called with response:{response}, dataset_name:{dataset_name}")
     extractors = {
         "musique": extract_qa_answer,
         "quality": extract_qa_answer,

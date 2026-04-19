@@ -8,5 +8,5 @@ def to_text(x) -> str:
     return str(x)
 
 def get_current_user() -> str:
-    username = os.getenv("USER") or os.getenv("USERNAME")  # For cross-platform compatibility
+    username = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
     return username
