@@ -9,9 +9,12 @@ the P2 dataset-level blind peer-review policy.
 
 | File | Change |
 |---|---|
-| `p2_policy.py` | Full rewrite — `DatasetCouncilPolicy` |
+| `p2_policy.py` | Full rewrite — `DatasetCouncilPolicy`; added `cases=` param to `run()` |
 | `prompts.py` | Added rater prompt section |
 | `__init__.py` | Updated exports |
+| `run.py` | CLI entry point (`council-p2`); saves results to JSON (`--output`) |
+| `p2_benchmark.py` | New — benchmark runner using same datasets as P1 |
+| `bench_cli.py` | New — CLI entry point (`council-p2-bench`) |
 
 ---
 
@@ -279,6 +282,79 @@ from council_policies import (
     LearnedRouterPolicy,
 )
 ```
+
+---
+
+## 4. `run.py` — CLI entry point
+
+Runs P2 policy and saves results to JSON.
+
+```bash
+uv run council-p2 --provider huggingface --n-per-dataset 5 --output results.json
+```
+
+**CLI args:**
+
+| Arg | Default | Description |
+|---|---|---|
+| `--provider` | `openrouter` | `openrouter` / `openai` / `huggingface` |
+| `--qa-model` | provider default | Model for qa role |
+| `--reasoning-model` | provider default | Model for reasoning role |
+| `--general-model` | provider default | Model for general role |
+| `--n-per-dataset` | `5` | Questions per dataset |
+| `--output` | `p2_results.json` | Path to save results JSON |
+
+**Output JSON structure:**
+```json
+{
+  "run_at": "2026-04-19T...",
+  "provider": "huggingface",
+  "dataset_votes": [{"dataset_name": "musique", "winner": "reasoning", ...}],
+  "questions": [{"example_id": "...", "best_model": "reasoning", "best_answer": "...", ...}]
+}
+```
+
+---
+
+## 5. `p2_benchmark.py` + `bench_cli.py` — Benchmark runner
+
+Runs P2 on the **same datasets and questions as P1** and saves structured scored output.
+
+```bash
+uv run council-p2-bench --provider huggingface --n-per-dataset 50
+# or specific datasets:
+uv run council-p2-bench --provider huggingface --datasets musique fever --n-per-dataset 10
+```
+
+**How it differs from `council-p2`:**
+
+| | `council-p2` | `council-p2-bench` |
+|---|---|---|
+| Data source | Loads from HuggingFace via `DatasetProfile` | Same HuggingFace data via `get_dataset_profile` |
+| Output | Single JSON file | Scored JSONL + summaries (same layout as P1) |
+| Metrics | None | Ground-truth scoring via `task_eval` |
+| Purpose | Quick run / demo | Fair comparison against P1 results |
+
+**Output directory structure:**
+```
+p2_benchmark_results/
+  p2_suite_<timestamp>/
+    scores/
+      musique.jsonl       ← one line per question
+      quality.jsonl
+    summaries/
+      musique.json        ← council winner + aggregated metrics
+    suite_metrics.json    ← all datasets combined
+```
+
+**`run()` now accepts `cases=` directly:**
+
+```python
+# Pass questions directly instead of loading from datasets
+result = await policy.run(cases=my_cases)
+```
+
+This is how `p2_benchmark.py` feeds the same questions P1 uses to P2.
 
 ---
 

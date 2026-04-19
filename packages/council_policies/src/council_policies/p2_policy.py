@@ -401,26 +401,33 @@ class DatasetCouncilPolicy:
     # ── Public API ─────────────────────────────────────────────────────────────
 
     async def run(
-        self, profiles: list[DatasetProfile] | None = None
+        self,
+        profiles: list[DatasetProfile] | None = None,
+        cases: list[EvaluationCase] | None = None,
     ) -> P2PolicyResult:
         """
-        Sample questions from all dataset profiles, run generation + peer-review
-        rating, and return structured results for the aggregator.
+        Run generation + peer-review rating and return structured results.
 
         Args:
-            profiles: Defaults to all available profiles when None.
+            cases:    Pass a list of EvaluationCase directly — skips dataset
+                      loading entirely. Use this to run P2 on the same questions
+                      as P1 or any other source.
+            profiles: Used only when `cases` is None. Defaults to all available
+                      profiles when both are None.
         """
-        if profiles is None:
-            profiles = load_all_profiles()
-
-        cases = self.sample_cases(profiles)
+        if cases is not None:
+            pass  # use provided cases directly
+        else:
+            if profiles is None:
+                profiles = load_all_profiles()
+            cases = self.sample_cases(profiles)
         if not cases:
             logger.warning("No cases sampled — check that profiles are non-empty.")
             return P2PolicyResult()
 
         logger.info(
             "P2 DatasetCouncilPolicy: %d questions, %d datasets, roles=%s",
-            len(cases), len(profiles), self.council_roles,
+            len(cases), len(profiles) if profiles is not None else "?", self.council_roles,
         )
 
         outcomes = await asyncio.gather(*[self._run_question(c) for c in cases])
