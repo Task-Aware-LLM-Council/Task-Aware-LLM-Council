@@ -13,6 +13,20 @@ from council_policies.p2_policy import (
 )
 from council_policies.p3_policy import RuleBasedRoutingPolicy, classify_task
 from council_policies.p4_policy import LearnedRouterPolicy
+from council_policies.policy_adapters import P2PromptAdapter, P3Adapter, P4Adapter
+from council_policies.policy_runner import (
+    BasePolicyAdapter,
+    CouncilBenchmarkRunner,
+    CouncilPolicyAdapter,
+    PolicyBenchmarkResult,
+    PolicyExecutionState,
+    PolicyResult,
+    PolicyRuntime,
+    SpecialistCache,
+    SpecialistRequest,
+    build_specialist_cache_key,
+    request_fingerprint,
+)
 from council_policies.router import (
     DispatchRun,
     KeywordRouter,
@@ -25,13 +39,23 @@ from council_policies.voter import run_vote
 
 __all__ = [
     "CouncilResponse",
+    "CouncilBenchmarkRunner",
+    "CouncilPolicyAdapter",
     "DatasetCouncilPolicy",
     "DatasetVoteSummary",
     "Decomposer",
     "DispatchRun",
     "KeywordRouter",
     "LearnedRouterPolicy",
+    "P2PromptAdapter",
+    "P3Adapter",
+    "P4Adapter",
     "ModelAnswer",
+    "BasePolicyAdapter",
+    "PolicyBenchmarkResult",
+    "PolicyExecutionState",
+    "PolicyResult",
+    "PolicyRuntime",
     "P2PolicyResult",
     "P2QuestionResult",
     "PassthroughDecomposer",
@@ -41,12 +65,16 @@ __all__ = [
     "RoutingDecision",
     "RuleBasedRoutingPolicy",
     "Subtask",
+    "SpecialistCache",
+    "SpecialistRequest",
     "SynthesisResult",
     "TASK_TO_ROLE",
     "TaskType",
+    "build_specialist_cache_key",
     "classify_task",
     "compute_dataset_votes",
     "load_all_profiles",
+    "request_fingerprint",
     "run_vote",
     "synthesize",
     "synthesize_ordered",
