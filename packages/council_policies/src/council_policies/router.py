@@ -13,14 +13,18 @@ contract surface:
                                             ▼
                      Specialist call ──► DispatchRun.response
 
-The `LearnedRouter` implementation lands in Step 5; this module only
-ships the types, the protocol, and a `KeywordRouter` fixture that wraps
-P3's regex classifier so the policy (Step 2) and the ordered-synthesis
-entry point (Step 4b) have something real to depend on.
+Two `Router` implementations ship in this module:
+  * `KeywordRouter` — wraps P3's regex classifier. Fast, deterministic,
+    zero-dep; the permanent test fixture.
+  * `LearnedRouter` — fine-tuned distilroberta classifier. Pure decision
+    logic, backed by an injectable `ScoreFn` so the heavy HF model load
+    stays out of unit tests. The HF-backed `ScoreFn` adapter lands with
+    the training script.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -28,6 +32,9 @@ from model_orchestration import OrchestratorResponse
 
 from council_policies.models import TaskType
 from council_policies.p3_policy import classify_task
+from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Placeholder TaskType → role collapse
@@ -56,10 +63,18 @@ _PLACEHOLDER_TASKTYPE_TO_ROLE: dict[TaskType, str] = {
 class Subtask:
     """One decomposed step. `order` is the logical execution index —
     trust it over list position, since decomposer output may not be
-    pre-sorted."""
+    pre-sorted.
+
+    `suggested_role` is an optional hint emitted by the `LLMDecomposer`
+    (one of e.g. `math`, `code`, `fact_verify`, `qa_multihop`,
+    `qa_longctx` — the decomposer-level role vocabulary, not the
+    orchestrator role name). The `Router` is free to ignore it or use
+    it as a prior; today's `KeywordRouter` ignores it and classifies
+    from `text` independently."""
 
     text: str
     order: int
+    suggested_role: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -180,4 +195,129 @@ class KeywordRouter:
             role=role,
             scores={role: 1.0},
             confidence=1.0,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Learned router
+# --------------------------------------------------------------------------- #
+
+
+class ScoreFn(Protocol):
+    """Adapter seam between the decision logic and the ML model.
+
+    One method — text in, role→probability map out. The HF-backed
+    implementation (distilroberta fine-tune loaded via
+    `transformers.from_pretrained`) ships alongside the training script;
+    unit tests inject a deterministic fake so the router logic can be
+    exercised without torch.
+
+    Probabilities SHOULD sum to ~1.0 (i.e. a softmax over the role
+    action space) but `LearnedRouter` does not re-normalize — it trusts
+    the adapter. Calibration is the adapter's problem, not the
+    router's.
+    """
+
+    def __call__(self, text: str) -> dict[str, float]: ...
+
+
+class LearnedRouter:
+    """
+    Fine-tuned classifier-based router. Pure decision logic:
+    tokenized-input formatting → `ScoreFn` call → floor → dispatch
+    decision. No model IO here.
+
+    Parameters
+    ----------
+    score_fn:
+        Any `ScoreFn`. Production wires the HF adapter; tests pass a
+        fake that returns canned dicts.
+    fallback_role:
+        Role used when top-1 probability is below `floor`. Must be a
+        key that the orchestrator registered — validated lazily in the
+        policy, not here (the router has no orchestrator handle).
+    floor:
+        Minimum top-1 probability required to route to the learned
+        argmax. Below this, we route to `fallback_role` and flag
+        `fallback_used=True`. Default 0.3 matches the training plan;
+        calibrate from dev-set ROC once training lands.
+    context_char_cap:
+        Hard cap on context text fed to the model, before tokenization.
+        The tokenizer truncates again to its own max length — this is
+        an upstream guard so we don't waste tokenizer time on text
+        that will be dropped. Per the P4 plan: 2048 chars.
+
+    Scoring on fallback
+    -------------------
+    When confidence < floor, we KEEP the learned score distribution
+    and report `confidence=max(scores.values())`. Rationale: the
+    learned scores are the most useful telemetry for calibrating
+    `floor` later. Overwriting with `{fallback_role: 0.0}` would match
+    `KeywordRouter`'s fallback shape but discards the "how uncertain"
+    signal that the learned model actually produced.
+
+    Callers distinguish fallback-vs-routed via `fallback_used`, not
+    via inspecting `scores`.
+    """
+
+    def __init__(
+        self,
+        *,
+        score_fn: ScoreFn,
+        fallback_role: str,
+        floor: float = 0.3,
+        context_char_cap: int = DEFAULT_CONTEXT_CHAR_CAP,
+    ) -> None:
+        if not 0.0 <= floor <= 1.0:
+            raise ValueError(f"floor must be in [0, 1], got {floor}")
+        if context_char_cap < 0:
+            raise ValueError(
+                f"context_char_cap must be >= 0, got {context_char_cap}"
+            )
+        self._score_fn = score_fn
+        self.fallback_role = fallback_role
+        self.floor = floor
+        self.context_char_cap = context_char_cap
+
+    def classify(self, prompt: str, *, context: str = "") -> RoutingDecision:
+        text = self._format_input(prompt, context)
+        scores = self._score_fn(text)
+
+        if not scores:
+            logger.warning(
+                "LearnedRouter: score_fn returned empty dict; "
+                "falling back to %s",
+                self.fallback_role,
+            )
+            return RoutingDecision(
+                role=self.fallback_role,
+                scores={},
+                confidence=0.0,
+                fallback_used=True,
+                fallback_reason="empty_scores",
+            )
+
+        top_role, top_score = max(scores.items(), key=lambda kv: kv[1])
+
+        if top_score < self.floor:
+            return RoutingDecision(
+                role=self.fallback_role,
+                scores=scores,
+                confidence=top_score,
+                fallback_used=True,
+                fallback_reason="low_confidence",
+            )
+
+        return RoutingDecision(
+            role=top_role,
+            scores=scores,
+            confidence=top_score,
+        )
+
+    def _format_input(self, prompt: str, context: str) -> str:
+        """Delegate to `router_featurize.featurize` — single source of
+        truth shared with training. See that module's docstring for
+        the training/serving-skew rationale."""
+        return featurize(
+            prompt, context, context_char_cap=self.context_char_cap
         )

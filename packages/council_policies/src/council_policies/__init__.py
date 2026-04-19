@@ -1,4 +1,9 @@
-from council_policies.decomposer import Decomposer, PassthroughDecomposer
+from council_policies.decomposer import (
+    DEFAULT_DECOMPOSER_SYSTEM_PROMPT,
+    Decomposer,
+    LLMDecomposer,
+    PassthroughDecomposer,
+)
 from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
 from council_policies.p2_policy import (
     DatasetCouncilPolicy,
@@ -30,9 +35,21 @@ from council_policies.policy_runner import (
 from council_policies.router import (
     DispatchRun,
     KeywordRouter,
+    LearnedRouter,
     Router,
     RoutingDecision,
+    ScoreFn,
     Subtask,
+)
+from council_policies.router_card import CARD_SCHEMA_VERSION, RouterCard
+from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.router_labels import (
+    DEFAULT_FALLBACK_ROLE,
+    ROLE_LABELS,
+    SKILL_TAG_PRIORITY_TO_ROLE,
+    index_to_role,
+    role_from_tags,
+    role_to_index,
 )
 from council_policies.synthesis import SynthesisResult, synthesize, synthesize_ordered
 from council_policies.voter import run_vote
@@ -41,12 +58,26 @@ __all__ = [
     "CouncilResponse",
     "CouncilBenchmarkRunner",
     "CouncilPolicyAdapter",
+    "DEFAULT_DECOMPOSER_SYSTEM_PROMPT",
     "DatasetCouncilPolicy",
     "DatasetVoteSummary",
     "Decomposer",
+    "LLMDecomposer",
     "DispatchRun",
+    "CARD_SCHEMA_VERSION",
+    "DEFAULT_CONTEXT_CHAR_CAP",
+    "DEFAULT_FALLBACK_ROLE",
     "KeywordRouter",
+    "LearnedRouter",
     "LearnedRouterPolicy",
+    "ROLE_LABELS",
+    "RouterCard",
+    "SKILL_TAG_PRIORITY_TO_ROLE",
+    "ScoreFn",
+    "featurize",
+    "index_to_role",
+    "role_from_tags",
+    "role_to_index",
     "P2PromptAdapter",
     "P3Adapter",
     "P4Adapter",
