@@ -3,8 +3,9 @@ Shared test fixtures for council_policies tests.
 
 Two-phase pattern (reviewer's PR #10 feedback, 2026-04-18):
   - `FakeOrchestrator` implements the async-context-manager + `load_all`
-    surface that `LearnedRouterPolicy.run_batch` uses. Real orchestrator
-    spins vLLM subprocesses; the fake's enter/exit are no-ops.
+    surface that `PolicyRuntime` opens on behalf of adapter-shaped
+    policies (P3/P4). Real orchestrator spins vLLM subprocesses; the
+    fake's enter/exit are no-ops.
   - `orchestrator_factory` maps sentinel configs → fake orchestrators,
     so tests can inject specialist and synthesizer fakes separately.
 
@@ -137,8 +138,8 @@ class FakeOrchestrator:
 
 
 class _RoleSpec:
-    """Minimal ModelSpec stand-in: just the attributes P4 reads in
-    `_assert_role_registered`."""
+    """Minimal ModelSpec stand-in: just the attributes that
+    `PolicyRuntime._known_roles` walks."""
     def __init__(self, role: str, aliases: tuple[str, ...] = ()) -> None:
         self.role = role
         self.aliases = aliases
@@ -146,7 +147,8 @@ class _RoleSpec:
 
 class ConfigSentinel:
     """Stand-in for `OrchestratorConfig` during tests. Exposes `models`
-    so the policy's construction-time validation works."""
+    so `PolicyRuntime._known_roles` can enumerate registered
+    roles/aliases without spinning up a real orchestrator."""
     def __init__(self, roles: tuple[str, ...]) -> None:
         self.models = tuple(_RoleSpec(r, (r,)) for r in roles)
 

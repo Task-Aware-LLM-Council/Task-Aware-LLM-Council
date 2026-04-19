@@ -1,301 +1,268 @@
 """
 P4: learned-router policy with LLM decomposition + ordered synthesis.
 
-Two-phase GPU lifecycle (per reviewer's callout on PR #10 — see
-`test_orchestartor_client.py` at the repo root for the reference):
+Adapter-shaped. The policy exposes `plan()` / `finalize()` so
+`CouncilBenchmarkRunner` can batch its specialist dispatch alongside
+other policies in Phase 1, then drive synthesis in Phase 2.
 
-  Phase 1 ─ specialist dispatch ─────────────────────────────────┐
-    async with ModelOrchestrator(specialist_config) as spec_orch: │
-        await spec_orch.load_all(max_parallel=1)                  │  ≤ 3 models
-        for req in batch:                                         │  GPU-resident
-            decompose → route → group into runs                   │
-            dispatch runs in parallel through spec_orch           │
-  ← specialist orchestrator exits, GPU memory reclaimed ──────────┘
+Two-phase GPU residency is enforced by the runner, not this class:
 
-  Phase 2 ─ synthesis ───────────────────────────────────────────┐
-    async with ModelOrchestrator(synthesizer_config) as synth:    │
-        await synth.load_all(max_parallel=1)                      │  1 model
-        for req in batch where len(runs) > 1:                     │  GPU-resident
-            synthesize_ordered(…, orchestrator=synth)              │
-  ← synthesizer orchestrator exits ──────────────────────────────┘
+  Phase 1 ─ specialist dispatch (runner opens specialist_orchestrator) ─┐
+    plan() declares SpecialistRequests → runner executes them in        │
+    parallel across every policy in the batch → runner closes the       │  ≤ N specialist models
+    specialist orchestrator, reclaiming GPU memory.                     │  GPU-resident
+  ← specialist orchestrator closed ───────────────────────────────────┘
 
-Peak GPU residency = 3 models (never 4). Single-run requests skip Phase 2
-entirely via the short-circuit in `synthesize_ordered`.
+  Phase 2 ─ synthesis (runner only opens synthesizer if needed) ────────┐
+    finalize() calls runtime.get_synthesizer_orchestrator() only when   │
+    len(runs) > 1 — single-run requests short-circuit and never touch   │  1 synthesizer model
+    the synthesizer. Multiple multi-run requests share the one opened   │  GPU-resident
+    synthesizer orchestrator.                                           │
+  ← synthesizer orchestrator closed ──────────────────────────────────┘
 
-`Router` and `Decomposer` are protocols (see router.py, decomposer.py);
-this file depends on the interfaces only.
+Peak GPU residency = specialist config's worth of models (never the
+synthesizer simultaneously).
+
+Role validation is *lazy* and lives in `plan()`:
+  - primary router role absent + fallback_role also absent → RuntimeError
+  - synthesizer_role absent AND len(runs) > 1 → RuntimeError
+
+This replaces the old eager __init__ check so construction can happen
+before any orchestrator config is fully wired up. Regression guard
+ported from the P3 fix in commit 053ce82.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import replace
-from typing import Any, Callable
+from typing import Any
 
 from llm_gateway import PromptRequest
-from model_orchestration import ModelOrchestrator, OrchestratorConfig, OrchestratorResponse
 
-from council_policies.decomposer import Decomposer
-from council_policies.models import CouncilResponse
+from council_policies.decomposer import Decomposer, PassthroughDecomposer
+from council_policies.policy_runner import (
+    BasePolicyAdapter,
+    PolicyExecutionState,
+    PolicyResult,
+    PolicyRuntime,
+    SpecialistCache,
+    SpecialistRequest,
+    build_run_from_cached_response,
+    build_specialist_cache_key,
+    make_policy_result,
+    orchestrator_to_prompt_response,
+)
 from council_policies.router import DispatchRun, RoutingDecision, Router, Subtask
-from council_policies.synthesis import SynthesisResult, synthesize_ordered
+from council_policies.synthesis import synthesize_ordered
 
 logger = logging.getLogger(__name__)
 
 
-# Factory for tests: `orchestrator_factory(config)` must return an async
-# context manager yielding something with `get_client(role)` and
-# `load_all(max_parallel=…)`. In production this is `ModelOrchestrator`
-# itself; tests pass a lambda returning a FakeOrchestrator.
-OrchestratorFactory = Callable[[OrchestratorConfig], Any]
-
-
-class LearnedRouterPolicy:
+class LearnedRouterPolicy(BasePolicyAdapter):
     """
-    P4 policy — decompose, route, dispatch, synthesize.
+    P4 — learned-router policy with decomposition + ordered synthesis.
 
     Parameters
     ----------
-    specialist_config:
-        `OrchestratorConfig` for the three specialist models. Must register
-        every role the router can emit plus the `fallback_role`. Does
-        *not* register the synthesizer.
-    synthesizer_config:
-        `OrchestratorConfig` for the synthesizer only. Kept separate so
-        Phase 2 runs after Phase 1 has torn down.
     router:
-        Any `Router` — `KeywordRouter` for fixtures/tests, `LearnedRouter`
-        for real dispatch.
+        Any `Router`. `KeywordRouter` for fixtures/tests,
+        `LearnedRouter` for real dispatch.
     decomposer:
-        Any `Decomposer` — `PassthroughDecomposer` for single-skill parity
-        tests, `LLMDecomposer` for real multi-skill fan-out.
+        Any `Decomposer`. Defaults to `PassthroughDecomposer` so a
+        caller with no multi-skill decomposition still gets P3-like
+        single-subtask behavior.
     fallback_role:
-        Dispatched when the router signals uncertainty
-        (`RoutingDecision.fallback_used=True`). Can't be validated at
-        construction (no orchestrator is live yet) — validation fires
-        lazily when the specialist orchestrator is entered in `run_batch`.
+        Dispatched when the router's role isn't registered on the
+        specialist orchestrator. If the fallback is also missing,
+        `plan()` raises `RuntimeError` naming both roles.
     synthesizer_role:
-        Referee role name inside `synthesizer_config`. Must not overlap
+        Referee role on the synthesizer orchestrator. Must not collide
         with any role the router can emit (self-bias guard in
-        `synthesize_ordered`).
+        `synthesize_ordered`). Checked lazily in `plan()` only when
+        synthesis will actually fire (len(runs) > 1).
     max_subtasks:
         Hard ceiling on subtasks per request. Decomposer output is
-        truncated (in `order` sequence) if it exceeds this.
-    specialist_load_parallel:
-        Passed as `max_parallel` to `spec_orch.load_all()`. Default 1
-        matches `test_orchestartor_client.py` — loading specialists
-        sequentially keeps peak GPU memory bounded during warmup.
-    orchestrator_factory:
-        Test seam. Production passes `ModelOrchestrator` (the default);
-        tests pass a factory returning a fake async context manager.
+        sorted by `order` then truncated if it exceeds this.
     """
+
+    policy_id = "p4"
 
     def __init__(
         self,
         *,
-        specialist_config: OrchestratorConfig,
-        synthesizer_config: OrchestratorConfig,
         router: Router,
-        decomposer: Decomposer,
+        decomposer: Decomposer | None = None,
         fallback_role: str = "fact_general",
         synthesizer_role: str = "synthesizer",
         max_subtasks: int = 4,
-        specialist_load_parallel: int = 1,
-        orchestrator_factory: OrchestratorFactory = ModelOrchestrator,
     ) -> None:
         if max_subtasks < 1:
             raise ValueError(f"max_subtasks must be >= 1, got {max_subtasks}")
-        if specialist_load_parallel < 1:
-            raise ValueError(
-                f"specialist_load_parallel must be >= 1, got {specialist_load_parallel}"
-            )
-
-        self.specialist_config = specialist_config
-        self.synthesizer_config = synthesizer_config
         self.router = router
-        self.decomposer = decomposer
+        self.decomposer = decomposer or PassthroughDecomposer()
         self.fallback_role = fallback_role
         self.synthesizer_role = synthesizer_role
         self.max_subtasks = max_subtasks
-        self.specialist_load_parallel = specialist_load_parallel
-        self._orchestrator_factory = orchestrator_factory
 
-        # Fail fast on misconfigured role names — inspect the config specs
-        # without starting any orchestrator. An orchestrator isn't live yet,
-        # so we walk `config.models` to build the alias set. This is the
-        # equivalent of the P3 constructor check, adapted for the two-config
-        # world.
-        self._assert_role_registered(
-            specialist_config, "fallback_role", fallback_role
-        )
-        self._assert_role_registered(
-            synthesizer_config, "synthesizer_role", synthesizer_role
-        )
-
-    async def run(self, request: PromptRequest) -> CouncilResponse:
-        """Single-question path. Pays two cold-starts (specialist + synth).
-        For throughput, use `run_batch` — it amortizes both phases across
-        the batch."""
-        responses = await self.run_batch([request])
-        return responses[0]
-
-    async def run_batch(self, requests: list[PromptRequest]) -> list[CouncilResponse]:
-        """Batched two-phase execution; see module docstring."""
-        if not requests:
-            return []
-
-        # ---- Phase 1: specialist dispatch ----
-        batched_subtasks: list[list[Subtask]] = []
-        batched_decisions: list[list[RoutingDecision]] = []
-        batched_runs: list[list[DispatchRun]] = []
-
-        async with self._orchestrator_factory(self.specialist_config) as spec_orch:
-            await spec_orch.load_all(max_parallel=self.specialist_load_parallel)
-
-            for req in requests:
-                subs, decisions, runs = await self._dispatch_one(req, spec_orch)
-                batched_subtasks.append(subs)
-                batched_decisions.append(decisions)
-                batched_runs.append(runs)
-        # ← specialists released here
-
-        # ---- Phase 2: synthesize multi-run requests ----
-        needs_synth = [i for i, runs in enumerate(batched_runs) if len(runs) > 1]
-        synth_results: dict[int, SynthesisResult] = {}
-
-        if needs_synth:
-            async with self._orchestrator_factory(self.synthesizer_config) as synth_orch:
-                await synth_orch.load_all(max_parallel=1)
-
-                for i in needs_synth:
-                    synth_results[i] = await synthesize_ordered(
-                        question=requests[i].user_prompt or "",
-                        runs=batched_runs[i],
-                        orchestrator=synth_orch,
-                        synthesizer_role=self.synthesizer_role,
-                    )
-        # ← synthesizer released here
-
-        # ---- Assemble CouncilResponses ----
-        return [
-            self._build_response(
-                runs=batched_runs[i],
-                subtasks=batched_subtasks[i],
-                decisions=batched_decisions[i],
-                synth_result=synth_results.get(i),
-            )
-            for i in range(len(requests))
-        ]
-
-    async def _dispatch_one(
+    async def plan(
         self,
         request: PromptRequest,
-        orchestrator: ModelOrchestrator,
-    ) -> tuple[list[Subtask], list[RoutingDecision], list[DispatchRun]]:
+        runtime: PolicyRuntime,
+    ) -> PolicyExecutionState:
         prompt_text = request.user_prompt or ""
         context_text = request.context or ""
 
-        # 1. Decompose.
         subtasks = await self.decomposer.decompose(prompt_text, context=context_text)
         if not subtasks:
-            logger.warning("Decomposer returned no subtasks; falling back to single passthrough")
+            logger.warning(
+                "Decomposer returned no subtasks; falling back to single passthrough"
+            )
             subtasks = [Subtask(text=prompt_text, order=0)]
-
-        # Sort by order (trust the field, not list position) and cap.
         subtasks = sorted(subtasks, key=lambda s: s.order)[: self.max_subtasks]
 
-        # 2. Classify each subtask.
-        decisions = [
-            self.router.classify(s.text, context=context_text) for s in subtasks
-        ]
-
-        # 3. Group into contiguous same-role runs. Non-adjacent duplicates
-        # stay in separate runs so interleaved [A, B, A] ordering survives.
+        decisions: list[RoutingDecision] = []
         runs: list[DispatchRun] = []
-        for sub, decision in zip(subtasks, decisions):
-            if runs and runs[-1].role == decision.role:
-                runs[-1].append(sub)
+        for subtask in subtasks:
+            decision = self.router.classify(subtask.text, context=context_text)
+            role = self._resolve_role(decision.role, runtime)
+            resolved_decision = RoutingDecision(
+                role=role,
+                scores=decision.scores,
+                confidence=decision.confidence,
+                fallback_used=decision.fallback_used or role == self.fallback_role,
+                fallback_reason=decision.fallback_reason,
+            )
+            decisions.append(resolved_decision)
+            if runs and runs[-1].role == role:
+                runs[-1].append(subtask)
             else:
-                run = DispatchRun(role=decision.role)
-                run.append(sub)
+                run = DispatchRun(role=role)
+                run.append(subtask)
                 runs.append(run)
 
-        # 4. Dispatch runs in parallel through the specialist orchestrator.
-        async def _dispatch(run: DispatchRun) -> OrchestratorResponse:
+        if len(runs) > 1 and not runtime.has_synthesizer_role(self.synthesizer_role):
+            raise RuntimeError(
+                f"P4 LearnedRouterPolicy: synthesizer_role "
+                f"{self.synthesizer_role!r} is not registered in the "
+                f"synthesizer config, but this request requires synthesis "
+                f"({len(runs)} runs)."
+            )
+
+        specialist_requests: list[SpecialistRequest] = []
+        run_payloads: list[dict[str, Any]] = []
+        for index, run in enumerate(runs):
             sub_request = replace(request, user_prompt=run.rendered_prompt())
-            return await orchestrator.get_client(run.role).get_response(sub_request)
+            cache_key = build_specialist_cache_key(
+                self.policy_id,
+                request,
+                run.role,
+                phase="specialist",
+                prompt_override=sub_request,
+                extra=f"run-{index}",
+            )
+            specialist_requests.append(
+                SpecialistRequest(
+                    cache_key=cache_key,
+                    role=run.role,
+                    request=sub_request,
+                )
+            )
+            run_payloads.append(
+                {
+                    "role": run.role,
+                    "cache_key": cache_key,
+                    "subtasks": [
+                        {"text": subtask.text, "order": subtask.order}
+                        for subtask in run.subtasks
+                    ],
+                }
+            )
 
-        responses = await asyncio.gather(*(_dispatch(r) for r in runs))
-        for run, resp in zip(runs, responses):
-            run.response = resp
-
-        return subtasks, decisions, runs
-
-    def _build_response(
-        self,
-        *,
-        runs: list[DispatchRun],
-        subtasks: list[Subtask],
-        decisions: list[RoutingDecision],
-        synth_result: SynthesisResult | None,
-    ) -> CouncilResponse:
-        # Single-run: short-circuit — specialist response is the answer,
-        # no synthesizer call was made.
-        if synth_result is None:
-            winner = runs[0].response
-            synth_short_circuit: str | None = "single_run"
-            synth_used_fallback = False
-        else:
-            winner = synth_result.response
-            synth_short_circuit = synth_result.metadata.get("short_circuit")
-            synth_used_fallback = synth_result.used_fallback
-
-        specialist_responses = tuple(
-            r.response for r in runs if r.response is not None
-        )
-
-        return CouncilResponse(
-            winner=winner,  # type: ignore[arg-type]  # None only if dispatch failed, which would have raised
-            policy="p4",
-            task_type=None,
-            candidates=specialist_responses,
+        return PolicyExecutionState(
+            policy_id=self.policy_id,
+            request=request,
+            specialist_requests=specialist_requests,
             metadata={
                 "subtasks": [
-                    {"order": s.order, "text": s.text} for s in subtasks
+                    {"text": subtask.text, "order": subtask.order}
+                    for subtask in subtasks
                 ],
-                "runs": [
-                    {
-                        "role": r.role,
-                        "subtask_orders": [s.order for s in r.subtasks],
-                    }
-                    for r in runs
-                ],
+                "runs": run_payloads,
                 "router_scores": [d.scores for d in decisions],
                 "router_confidence": [d.confidence for d in decisions],
                 "router_fallback_used": [d.fallback_used for d in decisions],
                 "synthesizer_role": self.synthesizer_role,
-                "synthesis_short_circuit": synth_short_circuit,
-                "synthesis_used_fallback": synth_used_fallback,
+                "synthesis_used": len(run_payloads) > 1,
             },
         )
 
-    @staticmethod
-    def _assert_role_registered(
-        config: OrchestratorConfig,
-        field_name: str,
-        role: str,
-    ) -> None:
-        """Verify a role is present in a config's specs (role name OR alias)
-        without starting the orchestrator. Mirrors the old P3 constructor
-        check adapted for the specialist/synthesizer split."""
-        known: set[str] = set()
-        for spec in config.models:
-            known.add(str(spec.role))
-            known.update(str(a) for a in spec.aliases)
-        if role not in known:
-            raise ValueError(
-                f"LearnedRouterPolicy: {field_name} {role!r} is not "
-                f"registered in the provided config. Known roles/aliases: "
-                f"{sorted(known) or '(none)'}."
+    async def finalize(
+        self,
+        state: PolicyExecutionState,
+        cache: SpecialistCache,
+        runtime: PolicyRuntime,
+    ) -> PolicyResult:
+        run_payloads = list(state.metadata["runs"])
+
+        if len(run_payloads) == 1:
+            response = cache.get(run_payloads[0]["cache_key"])
+            return make_policy_result(
+                state,
+                response=orchestrator_to_prompt_response(
+                    response,
+                    metadata={
+                        "synthesis_short_circuit": "single_run",
+                        "synthesis_used_fallback": False,
+                    },
+                ),
+                extra_metadata={
+                    "synthesis_short_circuit": "single_run",
+                    "synthesis_used_fallback": False,
+                },
             )
+
+        runs: list[DispatchRun] = []
+        for run_payload in run_payloads:
+            response = cache.get(run_payload["cache_key"])
+            runs.append(
+                build_run_from_cached_response(
+                    run_payload["role"],
+                    run_payload["subtasks"],
+                    response,
+                )
+            )
+
+        synthesizer_orchestrator = await runtime.get_synthesizer_orchestrator()
+        synthesis_result = await synthesize_ordered(
+            question=state.request.user_prompt or "",
+            runs=runs,
+            orchestrator=synthesizer_orchestrator,
+            synthesizer_role=self.synthesizer_role,
+        )
+        short_circuit = synthesis_result.metadata.get("short_circuit")
+        return make_policy_result(
+            state,
+            response=orchestrator_to_prompt_response(
+                synthesis_result.response,
+                metadata={
+                    "synthesis_short_circuit": short_circuit,
+                    "synthesis_used_fallback": synthesis_result.used_fallback,
+                },
+            ),
+            extra_metadata={
+                "synthesis_short_circuit": short_circuit,
+                "synthesis_used_fallback": synthesis_result.used_fallback,
+            },
+        )
+
+    def _resolve_role(self, router_role: str, runtime: PolicyRuntime) -> str:
+        if runtime.has_specialist_role(router_role):
+            return router_role
+        if not runtime.has_specialist_role(self.fallback_role):
+            raise RuntimeError(
+                f"P4 LearnedRouterPolicy: router role {router_role!r} is "
+                f"not registered and fallback_role {self.fallback_role!r} "
+                f"is also missing from the specialist config."
+            )
+        return self.fallback_role

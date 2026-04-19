@@ -177,8 +177,9 @@ async def synthesize_ordered(
          merge claims, via `ORDERED_SYNTHESIZER_SYSTEM_PROMPT`.
 
     Each run must have had its `response` assigned before calling this —
-    typically by `LearnedRouterPolicy.run()` after awaiting the specialist
-    dispatch gather.
+    typically by `LearnedRouterPolicy.finalize()` via
+    `build_run_from_cached_response()` after the runner's specialist
+    phase completes.
     """
     if not runs:
         raise ValueError("synthesize_ordered() requires at least one run")
