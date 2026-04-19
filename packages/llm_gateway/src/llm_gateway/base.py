@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
@@ -10,6 +11,8 @@ from time import perf_counter
 from typing import Any, Awaitable, Callable
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from llm_gateway.models import PromptRequest, PromptResponse, ProviderConfig, RetryPolicy
 
@@ -275,11 +278,11 @@ class BaseLLMClient(ABC):
                 attempt_number,
                 retry_after_seconds=retry_after_seconds,
             )
-            print(f"Request failed, attempt_number:{attempt_number}, try after:{delay_seconds}, last_error:{last_error}")
+            logger.warning("Request failed, attempt_number:%s, try after:%s, last_error:%s", attempt_number, delay_seconds, last_error)
             last_delay_seconds = delay_seconds
             await asyncio.sleep(delay_seconds)
 
-        print(f"Request failed completely, last_error:{last_error}")
+        logger.error("Request failed completely, last_error:%s", last_error)
         if last_error is None:
             raise LLMClientError(
                 f"{self.provider} request failed without an explicit error")

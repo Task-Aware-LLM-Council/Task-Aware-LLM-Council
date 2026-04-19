@@ -20,6 +20,7 @@ members = [
     "packages/task_eval",
     "packages/model-quantization",
     "packages/model-orchestration",
+    "packages/council_policies2",
 ]
 
 [tool.setuptools.packages.find]

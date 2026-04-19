@@ -4,18 +4,13 @@ version = "0.1.1"
 description = "P2, P3, and P4 orchestration policies for the LLM council"
 readme = "README.md"
 authors = [
-	{
-	name = "Aniruth",
-	email = "aniruths10@gmail.com"
-	}, 
-	{
-	name = "Om Ghag",
-	email = "oghag@usc.edu"
-	}
+	{	name = "Aniruth",	email = "aniruths10@gmail.com"	}, 
+	{	name = "Om Ghag",	email = "oghag@usc.edu"	},
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
 	"llm-gateway",
+	"model-orchestration",
 	"task-eval",
 ]
 
@@ -37,6 +32,7 @@ asyncio_mode = "auto"
 
 [tool.uv.sources]
 llm-gateway = {workspace = true}
+model-orchestration = {workspace = true}
 task-eval = {workspace = true}
 benchmarking-pipeline = {workspace = true}
 

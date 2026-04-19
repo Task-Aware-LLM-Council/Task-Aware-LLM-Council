@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 import subprocess
@@ -10,6 +11,8 @@ import traceback
 from collections import Counter
 
 from task_eval.normalization import normalize_answer, normalize_fever_label, tokenize_normalized
+
+logger = logging.getLogger(__name__)
 
 
 def exact_match(prediction: str, reference: str) -> float:
@@ -74,7 +77,7 @@ def numeric_accuracy(
     rel_tol: float = 0.01,
     abs_tol: float = 1e-6,
 ) -> float:
-    print(f"prediction:{prediction} - reference:{reference}")
+    logger.debug("prediction:%s - reference:%s", prediction, reference)
     predicted = _parse_number(prediction)
     gold = _parse_number(reference)
     if predicted is None or gold is None:
@@ -148,7 +151,7 @@ def pass_at_1(
         return 0.0
 
     if not _apptainer_available():
-        print("Apptainer not available")
+        logger.warning("Apptainer not available")
         return 0.0
     # if not _docker_available():
     #     print("Docker not available or not running")
