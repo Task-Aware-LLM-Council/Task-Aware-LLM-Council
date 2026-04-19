@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "datasets>=4.0.0",
+    "council-policies",
 ]
 
 [tool.uv.workspace]
@@ -20,8 +21,11 @@ members = [
     "packages/task_eval",
     "packages/model-quantization",
     "packages/model-orchestration",
-    "packages/council_policies2",
+    "packages/council_policies",
 ]
 
 [tool.setuptools.packages.find]
 where = ["packages"]
+
+[tool.uv.sources]
+council-policies = { workspace = true }

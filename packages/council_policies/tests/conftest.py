@@ -17,9 +17,32 @@ duplicate its many required fields.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# sys.path — make council_policies src + workspace deps importable
+# ---------------------------------------------------------------------------
+
+_TESTS_ROOT = Path(__file__).resolve().parent
+_PACKAGE_ROOT = _TESTS_ROOT.parent
+_WORKSPACE_ROOT = _PACKAGE_ROOT.parents[1]
+
+for _p in [
+    _TESTS_ROOT,                                               # fakes.py
+    _PACKAGE_ROOT / "src",                                    # council_policies
+    _WORKSPACE_ROOT / "packages" / "llm_gateway" / "src",
+    _WORKSPACE_ROOT / "packages" / "model-orchestration" / "src",
+    _WORKSPACE_ROOT / "packages" / "common" / "src",
+    _WORKSPACE_ROOT / "packages" / "task_eval" / "src",
+    _WORKSPACE_ROOT / "packages" / "benchmarking_pipeline" / "src",
+]:
+    _s = str(_p)
+    if _s not in sys.path:
+        sys.path.insert(0, _s)
 from llm_gateway import PromptRequest, PromptResponse
 from model_orchestration import OrchestratorResponse
 from model_orchestration.models import OrchestratorCallRecord

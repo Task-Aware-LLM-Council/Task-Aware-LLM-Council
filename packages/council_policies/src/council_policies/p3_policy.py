@@ -1,14 +1,52 @@
+"""
+P3 Rule-Based Routing Policy — keyword-based specialist dispatch.
+
+Flow per question
+-----------------
+1. Classify the task type from the question text using keyword regexes
+   (classify_task).
+2. Map the task type to the matching specialist role via TASK_TO_ROLE.
+3. Dispatch to that specialist's model via the orchestrator.
+4. If the specialist role is not registered in the orchestrator, fall back
+   gracefully to ``fallback_role`` rather than crashing.
+5. Return the routing result wrapped in a P3QuestionResult.
+
+Metrics (dataset-level)
+-----------------------
+compute_routing_summary() aggregates per-question results into
+RoutingSummary objects — one per dataset — reporting:
+  • how many questions were routed to each role
+  • task-type distribution
+  • average response latency per role
+
+The aggregator (separate module if needed) can use P3PolicyResult together
+with task_eval scoring to evaluate which routing strategy produced the
+best answers across datasets.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from llm_gateway import PromptRequest
-from model_orchestration import ModelOrchestrator
+from model_orchestration import ModelOrchestrator, OrchestratorResponse
 
-from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
+from council_policies.models import TASK_TO_ROLE, TaskType
+
+if TYPE_CHECKING:
+    from task_eval.interfaces import DatasetProfile
+    from task_eval.models import EvaluationCase
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_COUNCIL_ROLES = ("qa", "reasoning", "general")
+
+
+# ── Regex classifiers ─────────────────────────────────────────────────────────
 
 _MATH_RE = re.compile(
     r"\b(solve|calculat|comput|integrat|differentiat|derivativ|equation|inequalit|"
@@ -38,6 +76,26 @@ _FEVER_RE = re.compile(
 )
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def load_all_profiles() -> list[DatasetProfile]:
+    """Return one instance of every available dataset profile."""
+    from task_eval.profiles import (
+        FeverProfile,
+        HardMathProfile,
+        HumanEvalPlusProfile,
+        MusiqueProfile,
+        QualityProfile,
+    )
+    return [
+        MusiqueProfile(),
+        QualityProfile(),
+        FeverProfile(),
+        HardMathProfile(),
+        HumanEvalPlusProfile(),
+    ]
+
+
 def classify_task(prompt: str) -> TaskType:
     """Rule-based task classifier using keyword pattern matching."""
     text = prompt.lower()
@@ -56,58 +114,121 @@ def classify_task(prompt: str) -> TaskType:
     return TaskType.QA
 
 
-# ---------------------------------------------------------------------------
-# Lazy synthesis import
-# ---------------------------------------------------------------------------
-# Per the README (§Two aggregation paradigms), P3 aggregates using
-# synthesis.synthesize — NOT voter.run_vote.  synthesis.py is listed as
-# "stable" in the package table but has not been created yet.
-#
-# We attempt the import here so that:
-#   • p3_policy.py is importable and testable right now (no crash).
-#   • The synthesis path activates automatically the moment synthesis.py lands
-#     — no further edits required to p3_policy.py.
-# ---------------------------------------------------------------------------
-try:
-    from council_policies.synthesis import synthesize as _synthesize  # type: ignore[import-not-found]
-    _SYNTHESIS_AVAILABLE = True
-    logger.debug("council_policies.synthesis loaded — P3 will use synthesis aggregation.")
-except ImportError:
-    _synthesize = None  # type: ignore[assignment]
-    _SYNTHESIS_AVAILABLE = False
-    logger.debug(
-        "council_policies.synthesis not found — P3 will return the specialist "
-        "response directly until synthesis.py is created."
-    )
+# ── Output models ─────────────────────────────────────────────────────────────
 
+@dataclass
+class P3QuestionResult:
+    """Routing outcome for a single question."""
+
+    case: EvaluationCase
+    task_type: TaskType
+    routed_role: str
+    response: OrchestratorResponse | None = None
+    error: str | None = None
+
+    @property
+    def failed(self) -> bool:
+        return bool(self.error) or self.response is None
+
+    @property
+    def latency_ms(self) -> float | None:
+        if self.response is None:
+            return None
+        return self.response.latency_ms
+
+
+@dataclass
+class RoutingSummary:
+    """Per-dataset aggregate: routing distribution and average latency."""
+
+    dataset_name: str
+    question_count: int
+    role_counts: dict[str, int]        # role → number of questions routed to it
+    task_type_counts: dict[str, int]   # task_type value → count
+    avg_latency_ms: float | None       # across all successful questions in this dataset
+
+
+@dataclass
+class P3PolicyResult:
+    results: list[P3QuestionResult] = field(default_factory=list)
+    skipped_question_ids: list[str] = field(default_factory=list)
+    routing_summaries: list[RoutingSummary] = field(default_factory=list)
+
+
+# ── Dataset-level routing aggregation ─────────────────────────────────────────
+
+def compute_routing_summary(results: list[P3QuestionResult]) -> list[RoutingSummary]:
+    """
+    Aggregate per-question routing results into per-dataset RoutingSummary objects.
+
+    For each dataset, reports how often each specialist role was chosen
+    and the distribution of classified task types.
+    """
+    totals: dict[str, dict] = {}
+
+    for qr in results:
+        dataset = qr.case.example.dataset_name
+        if dataset not in totals:
+            totals[dataset] = {
+                "role_counts": {},
+                "task_type_counts": {},
+                "latencies": [],
+            }
+        bucket = totals[dataset]
+
+        role = qr.routed_role
+        bucket["role_counts"][role] = bucket["role_counts"].get(role, 0) + 1
+
+        tt = qr.task_type.value
+        bucket["task_type_counts"][tt] = bucket["task_type_counts"].get(tt, 0) + 1
+
+        if qr.latency_ms is not None:
+            bucket["latencies"].append(qr.latency_ms)
+
+    summaries: list[RoutingSummary] = []
+    for dataset, bucket in totals.items():
+        latencies = bucket["latencies"]
+        avg_lat = sum(latencies) / len(latencies) if latencies else None
+        question_count = sum(bucket["role_counts"].values())
+        summaries.append(RoutingSummary(
+            dataset_name=dataset,
+            question_count=question_count,
+            role_counts=dict(bucket["role_counts"]),
+            task_type_counts=dict(bucket["task_type_counts"]),
+            avg_latency_ms=avg_lat,
+        ))
+
+    summaries.sort(key=lambda s: s.dataset_name)
+    return summaries
+
+
+# ── P3 Policy ─────────────────────────────────────────────────────────────────
 
 class RuleBasedRoutingPolicy:
     """
-    P3: Route each request to the specialist model best suited for the task
-    using keyword-based classification.
+    P3: Route each question to the specialist model best suited for the task.
 
-    Aggregation (per README §Two aggregation paradigms)
-    ---------------------------------------------------
-    P3 uses *synthesis*, not voting.  When ``synthesis.py`` is present, the
-    routed specialist's response is passed to ``synthesize()`` which short-
-    circuits for a single-specialist call (no extra LLM call) and returns the
-    response verbatim.  This keeps P3 ready for the multi-skill upgrade
-    described in the README without any further changes to this file.
+    Usage::
+
+        orchestrator = ModelOrchestrator(config)
+        async with orchestrator:
+            policy = RuleBasedRoutingPolicy(orchestrator)
+            result = await policy.run()   # samples all datasets automatically
 
     Parameters
     ----------
     orchestrator:
-        A fully-configured ModelOrchestrator.
+        A fully-configured ModelOrchestrator. Must have at least
+        ``fallback_role`` registered — validated at construction time.
     fallback_role:
-        Role to use when the classified role is not registered in the
-        orchestrator.  Validated at construction time.  Defaults to
-        ``"general"``.
-    synthesizer_role:
-        The role whose model fuses partials when ``synthesis.py`` is
-        available.  For single-specialist P3 this role is never actually
-        called (short-circuit), but it must be registered so the upgraded
-        multi-skill path works without reconfiguring callers.  Defaults to
-        the dedicated ``"synthesizer"`` role (excluded from TASK_TO_ROLE).
+        Role used when the classified role is not registered.
+        Defaults to ``"general"``.
+    n_per_dataset:
+        Max questions sampled per dataset profile. Defaults to 5.
+    max_concurrent_questions:
+        Semaphore limit for concurrent dispatch calls. Defaults to 4.
+    seed:
+        Random seed for reproducible sampling order.
     """
 
     def __init__(
@@ -115,65 +236,85 @@ class RuleBasedRoutingPolicy:
         orchestrator: ModelOrchestrator,
         *,
         fallback_role: str = "general",
-        synthesizer_role: str = "synthesizer",
+        n_per_dataset: int = 5,
+        max_concurrent_questions: int = 4,
+        seed: int = 42,
     ) -> None:
+        # Validate the fallback role is registered — fail fast rather than
+        # silently at inference time on the first miss.
+        try:
+            orchestrator.get_client(fallback_role)
+        except KeyError:
+            raise ValueError(
+                f"RuleBasedRoutingPolicy: fallback_role {fallback_role!r} is not "
+                f"registered in the orchestrator. Register a ModelSpec with that "
+                f"role or alias before creating RuleBasedRoutingPolicy."
+            )
         self.orchestrator = orchestrator
         self.fallback_role = fallback_role
-        self.synthesizer_role = synthesizer_role
-        # Validate both roles at construction time so misconfiguration surfaces
-        # immediately rather than silently at inference time. synthesizer_role
-        # is validated here too so the multi-skill path can't blow up on first
-        # fan-out just because someone forgot to register the referee.
-        self._validate_role("fallback_role", self.fallback_role)
-        self._validate_role("synthesizer_role", self.synthesizer_role)
+        self.n_per_dataset = n_per_dataset
+        self._sem = asyncio.Semaphore(max_concurrent_questions)
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    # ── Sampling ──────────────────────────────────────────────────────────────
 
-    def _validate_role(self, field_name: str, role: str) -> None:
-        try:
-            self.orchestrator.get_client(role)
-        except KeyError as exc:
-            raise ValueError(
-                f"RuleBasedRoutingPolicy: {field_name} {role!r} is not registered "
-                f"in the orchestrator. Register a model with that role or alias, "
-                f"or pass a different {field_name}."
-            ) from exc
+    def sample_cases(self, profiles: list[DatasetProfile]) -> list[EvaluationCase]:
+        all_cases: list[EvaluationCase] = []
+        for profile in profiles:
+            bucket: list[EvaluationCase] = []
+            try:
+                for case in profile.iter_cases():
+                    bucket.append(case)
+                    if len(bucket) >= self.n_per_dataset:
+                        break
+            except Exception as exc:
+                logger.warning("Skipping dataset %r — iteration failed: %s", profile.name, exc)
+                continue
+            all_cases.extend(bucket)
+            logger.info("Sampled %d / %d from %s", len(bucket), self.n_per_dataset, profile.name)
+        return all_cases
 
-    def classify(self, prompt: str) -> TaskType:
-        return classify_task(prompt)
+    # ── Classification ────────────────────────────────────────────────────────
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def _classify(self, case: EvaluationCase) -> TaskType:
+        text = case.example.question or ""
+        return classify_task(text)
 
-    async def run(
-        self,
-        request: PromptRequest,
-        *,
-        task_type: TaskType | None = None,
-    ) -> CouncilResponse:
-        if task_type is None:
-            task_type = self.classify(request.user_prompt or "")
+    # ── Dispatch ──────────────────────────────────────────────────────────────
 
+    def _build_answer_request(self, case: EvaluationCase) -> PromptRequest:
+        example = case.example
+        if example.messages:
+            return PromptRequest(messages=example.messages)
+        return PromptRequest(
+            user_prompt=example.question,
+            context=example.context,
+            system_prompt=example.system_prompt,
+        )
+
+    async def _dispatch(
+        self, task_type: TaskType, request: PromptRequest
+    ) -> tuple[str, OrchestratorResponse]:
+        """
+        Dispatch to the specialist role for task_type, falling back to
+        fallback_role if the specialist is not registered.
+
+        Returns (routed_role, response).
+        """
         role = TASK_TO_ROLE[task_type]
-
-        # Dispatch to the specialist; fall back gracefully if not configured.
         try:
             response = await self.orchestrator.get_client(role).get_response(request)
-            routed_role = role
+            return role, response
         except KeyError:
             logger.warning(
                 "Role %r not configured; falling back to %r", role, self.fallback_role
             )
-            # FIX: guard the fallback call — a missing fallback_role now raises
-            # a clear RuntimeError instead of a bare KeyError.
+            # fallback_role is validated at construction, so this KeyError
+            # would only surface if the orchestrator was mutated after init.
             try:
                 response = await self.orchestrator.get_client(
                     self.fallback_role
                 ).get_response(request)
-                routed_role = self.fallback_role
+                return self.fallback_role, response
             except KeyError as exc:
                 raise RuntimeError(
                     f"Primary role {role!r} and fallback role {self.fallback_role!r} "
@@ -181,55 +322,80 @@ class RuleBasedRoutingPolicy:
                     f"Register at least one of them before running P3."
                 ) from exc
 
-        # ------------------------------------------------------------------
-        # Aggregation via synthesis (README §Two aggregation paradigms)
-        # ------------------------------------------------------------------
-        # Even for a single specialist, we route through synthesize() so the
-        # caller gets a consistent CouncilResponse shape and the policy is
-        # ready for the multi-skill upgrade with no further changes.
-        #
-        # synthesize({role: response}) short-circuits when len(partials) == 1
-        # and returns the single response verbatim — no extra LLM call.
-        # ------------------------------------------------------------------
-        if _SYNTHESIS_AVAILABLE:
+    # ── Per-question orchestration ─────────────────────────────────────────────
+
+    async def _run_question(self, case: EvaluationCase) -> P3QuestionResult | None:
+        async with self._sem:
+            task_type = self._classify(case)
+            request = self._build_answer_request(case)
             try:
-                result = await _synthesize(
-                    question=request.user_prompt or "",
-                    partials={routed_role: response},
-                    orchestrator=self.orchestrator,
-                    synthesizer_role=self.synthesizer_role,
-                )
-                return CouncilResponse(
-                    winner=result.response,
-                    policy="p3",
+                routed_role, response = await self._dispatch(task_type, request)
+                return P3QuestionResult(
+                    case=case,
                     task_type=task_type,
-                    candidates=(response,),
-                    metadata={
-                        "routed_role": routed_role,
-                        "synthesizer_role": self.synthesizer_role,
-                        "synthesis_short_circuit": result.metadata.get("short_circuit"),
-                        "synthesis_used_fallback": result.used_fallback,
-                    },
+                    routed_role=routed_role,
+                    response=response,
                 )
-            except Exception as exc:  # pragma: no cover
-                # Synthesis call failed — log and fall through to direct return
-                # so a synthesis bug never silently kills the whole policy run.
-                logger.warning(
-                    "synthesize() raised %s — returning specialist response directly: %s",
-                    type(exc).__name__,
-                    exc,
+            except Exception as exc:
+                logger.error(
+                    "Unexpected error on %s: %s", case.example.example_id, exc, exc_info=True
+                )
+                return P3QuestionResult(
+                    case=case,
+                    task_type=task_type,
+                    routed_role=self.fallback_role,
+                    error=str(exc),
                 )
 
-        # synthesis.py not yet created (or synthesis call failed above).
-        # Return the response directly.
-        # TODO: remove the non-synthesis fallback once synthesis.py is merged.
-        return CouncilResponse(
-            winner=response,
-            policy="p3",
-            task_type=task_type,
-            candidates=(response,),
-            metadata={
-                "routed_role": routed_role,
-                "synthesis_available": _SYNTHESIS_AVAILABLE,
-            },
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    async def run(
+        self, profiles: list[DatasetProfile] | None = None
+    ) -> P3PolicyResult:
+        """
+        Sample questions from all dataset profiles, route each to the
+        best specialist, and return structured results.
+
+        Args:
+            profiles: Defaults to all available profiles when None.
+        """
+        if profiles is None:
+            profiles = load_all_profiles()
+
+        cases = self.sample_cases(profiles)
+        if not cases:
+            logger.warning("No cases sampled — check that profiles are non-empty.")
+            return P3PolicyResult()
+
+        logger.info(
+            "P3 RuleBasedRoutingPolicy: %d questions, %d datasets, fallback=%r",
+            len(cases), len(profiles), self.fallback_role,
         )
+
+        outcomes = await asyncio.gather(*[self._run_question(c) for c in cases])
+
+        result = P3PolicyResult()
+        for case, outcome in zip(cases, outcomes):
+            if outcome is None or outcome.failed:
+                result.skipped_question_ids.append(case.example.example_id)
+                if outcome is not None:
+                    result.results.append(outcome)
+            else:
+                result.results.append(outcome)
+
+        result.routing_summaries = compute_routing_summary(result.results)
+
+        logger.info(
+            "P3 complete: %d succeeded, %d skipped.",
+            sum(1 for r in result.results if not r.failed),
+            len(result.skipped_question_ids),
+        )
+        for summary in result.routing_summaries:
+            logger.info(
+                "  %-20s  questions=%d  roles=%s  avg_latency=%.0fms",
+                summary.dataset_name,
+                summary.question_count,
+                summary.role_counts,
+                summary.avg_latency_ms or 0.0,
+            )
+        return result

@@ -1,3 +1,4 @@
+from council_policies.adapter import PolicyClient
 from council_policies.decomposer import Decomposer, PassthroughDecomposer
 from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
 from council_policies.p2_policy import (
@@ -11,7 +12,14 @@ from council_policies.p2_policy import (
     compute_dataset_votes,
     load_all_profiles,
 )
-from council_policies.p3_policy import RuleBasedRoutingPolicy, classify_task
+from council_policies.p3_policy import (
+    P3PolicyResult,
+    P3QuestionResult,
+    RoutingSummary,
+    RuleBasedRoutingPolicy,
+    classify_task,
+    compute_routing_summary,
+)
 from council_policies.p4_policy import LearnedRouterPolicy
 from council_policies.router import (
     DispatchRun,
@@ -35,6 +43,7 @@ __all__ = [
     "P2PolicyResult",
     "P2QuestionResult",
     "PassthroughDecomposer",
+    "PolicyClient",
     "RatingEntry",
     "RatingResult",
     "Router",

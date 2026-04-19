@@ -22,17 +22,10 @@ import logging
 import random
 from dataclasses import dataclass, field
 
+from typing import TYPE_CHECKING
+
 from llm_gateway import PromptRequest
 from model_orchestration import ModelOrchestrator, OrchestratorResponse
-from task_eval.interfaces import DatasetProfile
-from task_eval.models import EvaluationCase
-from task_eval.profiles import (
-    FeverProfile,
-    HardMathProfile,
-    HumanEvalPlusProfile,
-    MusiqueProfile,
-    QualityProfile,
-)
 
 from council_policies.prompts import (
     RATER_SYSTEM_PROMPT,
@@ -40,14 +33,16 @@ from council_policies.prompts import (
     parse_ratings,
 )
 
+if TYPE_CHECKING:
+    from task_eval.interfaces import DatasetProfile
+    from task_eval.models import EvaluationCase
+
 logger = logging.getLogger(__name__)
 
 _LABELS: tuple[str, ...] = ("A", "B", "C")
 
 _DEFAULT_COUNCIL_ROLES = ("qa", "reasoning", "general")
 
-# Max characters per answer shown to raters — prevents token limit issues
-# when combining 3 long answers (code, essays) in one rating prompt.
 _MAX_ANSWER_CHARS = 2000
 
 
@@ -55,6 +50,13 @@ _MAX_ANSWER_CHARS = 2000
 
 def load_all_profiles() -> list[DatasetProfile]:
     """Return one instance of every available dataset profile."""
+    from task_eval.profiles import (
+        FeverProfile,
+        HardMathProfile,
+        HumanEvalPlusProfile,
+        MusiqueProfile,
+        QualityProfile,
+    )
     return [
         MusiqueProfile(),
         QualityProfile(),
@@ -63,8 +65,6 @@ def load_all_profiles() -> list[DatasetProfile]:
         HumanEvalPlusProfile(),
     ]
 
-
-# ── Output models ──────────────────────────────────────────────────────────────
 
 @dataclass
 class ModelAnswer:
@@ -80,15 +80,15 @@ class ModelAnswer:
 
 @dataclass
 class RatingEntry:
-    label: str          # "A", "B", or "C" as shown to this rater
-    score: float        # 1–10
+    label: str
+    score: float
     reasoning: str = ""
 
 
 @dataclass
 class RatingResult:
     rater_role: str
-    label_to_role: dict[str, str]   # lets aggregator decode label → model role
+    label_to_role: dict[str, str]   
     ratings: list[RatingEntry]
     raw_text: str = ""
     error: str | None = None
@@ -397,8 +397,6 @@ class DatasetCouncilPolicy:
                     "Unexpected error on %s: %s", case.example.example_id, exc, exc_info=True
                 )
                 return None
-
-    # ── Public API ─────────────────────────────────────────────────────────────
 
     async def run(
         self, profiles: list[DatasetProfile] | None = None

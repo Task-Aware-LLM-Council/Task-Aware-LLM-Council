@@ -12,7 +12,12 @@ dependencies = [
 	"llm-gateway",
 	"model-orchestration",
 	"task-eval",
+    "benchmarking-pipeline",
+    "benchmark-runner",
 ]
+
+[project.scripts]
+p3-policy = "council_policies.cli:main"
 
 [project.optional-dependencies]
 test = [
@@ -35,6 +40,7 @@ llm-gateway = {workspace = true}
 model-orchestration = {workspace = true}
 task-eval = {workspace = true}
 benchmarking-pipeline = {workspace = true}
+benchmark-runner = {workspace = true}
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]
