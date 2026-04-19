@@ -435,7 +435,7 @@ def _utc_now() -> str:
 
 def _run_sync(coro):
     try:
-        asyncio.build_prompt_request()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     raise RuntimeError("Sync orchestration APIs cannot run inside an active event loop")
