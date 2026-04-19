@@ -176,7 +176,7 @@ async def test_passthrough_single_run_skips_synth_phase(
         decomposer=PassthroughDecomposer(),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="solve this math problem"))
+    response = await policy.run_council(PromptRequest(user_prompt="solve this math problem"))
 
     assert response.policy == "p4"
     assert response.winner.text == "response-from-math_code"
@@ -235,7 +235,7 @@ async def test_two_subtasks_two_roles_two_runs_one_synth(
         decomposer=StubDecomposer(subtasks),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="original composite prompt"))
+    response = await policy.run_council(PromptRequest(user_prompt="original composite prompt"))
 
     assert len(specialist_orch.get_client("math_code").requests) == 1
     assert len(specialist_orch.get_client("qa_reasoning").requests) == 1
@@ -275,7 +275,7 @@ async def test_two_adjacent_same_role_subtasks_merge_into_one_run(
         decomposer=StubDecomposer(subtasks),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="historical questions"))
+    response = await policy.run_council(PromptRequest(user_prompt="historical questions"))
 
     qa_requests = specialist_orch.get_client("qa_reasoning").requests
     assert len(qa_requests) == 1
@@ -316,7 +316,7 @@ async def test_aba_pattern_produces_three_runs_not_two(
         decomposer=StubDecomposer(subtasks),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="mixed"))
+    response = await policy.run_council(PromptRequest(user_prompt="mixed"))
 
     assert len(specialist_orch.get_client("qa_reasoning").requests) == 2
     assert len(specialist_orch.get_client("math_code").requests) == 1
@@ -356,7 +356,7 @@ async def test_router_fallback_flag_propagates_to_metadata(
         decomposer=StubDecomposer(subtasks),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="whatever"))
+    response = await policy.run_council(PromptRequest(user_prompt="whatever"))
 
     assert response.metadata["router_fallback_used"] == [True]
     assert len(specialist_orch.get_client("qa_reasoning").requests) == 1
@@ -381,7 +381,7 @@ async def test_max_subtasks_truncates_in_order(
         max_subtasks=2,
     )
 
-    response = await policy.run(PromptRequest(user_prompt="long"))
+    response = await policy.run_council(PromptRequest(user_prompt="long"))
 
     kept = response.metadata["subtasks"]
     assert len(kept) == 2
@@ -405,7 +405,7 @@ async def test_out_of_order_subtasks_are_sorted_before_grouping(
         decomposer=StubDecomposer(subtasks),
     )
 
-    response = await policy.run(PromptRequest(user_prompt="mixed"))
+    response = await policy.run_council(PromptRequest(user_prompt="mixed"))
 
     runs_meta = response.metadata["runs"]
     assert [r["role"] for r in runs_meta] == ["math_code", "qa_reasoning"]

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Protocol
 
+from llm_gateway import PromptRequest
 from model_orchestration import OrchestratorResponse
 
 
@@ -43,3 +44,7 @@ class CouncilResponse:
     @property
     def text(self) -> str:
         return self.winner.text
+
+
+class BenchmarkPolicy(Protocol):
+    async def run(self, request: PromptRequest) -> OrchestratorResponse: ...

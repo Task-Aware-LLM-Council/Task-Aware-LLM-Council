@@ -4,7 +4,7 @@ import logging
 import re
 
 from llm_gateway import PromptRequest
-from model_orchestration import ModelOrchestrator
+from model_orchestration import ModelOrchestrator, OrchestratorResponse
 
 from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
 
@@ -148,7 +148,7 @@ class RuleBasedRoutingPolicy:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(
+    async def run_council(
         self,
         request: PromptRequest,
         *,
@@ -233,3 +233,11 @@ class RuleBasedRoutingPolicy:
                 "synthesis_available": _SYNTHESIS_AVAILABLE,
             },
         )
+
+    async def run(
+        self,
+        request: PromptRequest,
+        *,
+        task_type: TaskType | None = None,
+    ) -> OrchestratorResponse:
+        return (await self.run_council(request, task_type=task_type)).winner

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 from llm_gateway import PromptRequest
 from model_orchestration import ModelOrchestrator, OrchestratorResponse
+from benchmarking_pipeline import BenchmarkExample
 from task_eval.interfaces import DatasetProfile
 from task_eval.models import EvaluationCase
 from task_eval.profiles import (
@@ -400,7 +401,23 @@ class DatasetCouncilPolicy:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    async def run(
+    async def run(self, request: PromptRequest) -> OrchestratorResponse:
+        """Benchmark-facing single-question API."""
+        result = await self.run_question(request)
+        best_answer = result.best_answer
+        if best_answer is None or best_answer.response is None:
+            raise RuntimeError("P2 could not select a winning response for the request")
+        return best_answer.response
+
+    async def run_question(self, request: PromptRequest) -> P2QuestionResult:
+        """Single-question path that preserves the existing P2 rating flow."""
+        case = self._case_from_request(request)
+        outcome = await self._run_question(case)
+        if outcome is None:
+            raise RuntimeError("P2 failed to produce any usable answer for the request")
+        return outcome
+
+    async def run_profiles(
         self, profiles: list[DatasetProfile] | None = None
     ) -> P2PolicyResult:
         """
@@ -445,3 +462,28 @@ class DatasetCouncilPolicy:
                 {r: f"{s:.1f}" for r, s in summary.scores_by_role.items()},
             )
         return result
+
+    def _case_from_request(self, request: PromptRequest) -> EvaluationCase:
+        prompt_text = request.user_prompt or self._prompt_text_for_request(request)
+        metadata = dict(request.metadata)
+        example_id = str(metadata.get("example_id") or "adhoc-example")
+        dataset_name = str(metadata.get("dataset_name") or "adhoc")
+        example = BenchmarkExample(
+            example_id=example_id,
+            dataset_name=dataset_name,
+            question=prompt_text,
+            context=request.context,
+            system_prompt=request.system_prompt,
+            messages=request.messages,
+            metadata=metadata,
+        )
+        return EvaluationCase(example=example)
+
+    @staticmethod
+    def _prompt_text_for_request(request: PromptRequest) -> str:
+        if request.messages:
+            return "\n".join(message.content for message in request.messages)
+        resolved_messages = request.resolved_messages()
+        if resolved_messages:
+            return "\n".join(message.content for message in resolved_messages)
+        return "(no question text)"

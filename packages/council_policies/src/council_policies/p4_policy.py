@@ -133,14 +133,21 @@ class LearnedRouterPolicy:
             synthesizer_config, "synthesizer_role", synthesizer_role
         )
 
-    async def run(self, request: PromptRequest) -> CouncilResponse:
+    async def run_council(self, request: PromptRequest) -> CouncilResponse:
         """Single-question path. Pays two cold-starts (specialist + synth).
         For throughput, use `run_batch` — it amortizes both phases across
         the batch."""
-        responses = await self.run_batch([request])
+        responses = await self.run_batch_council([request])
         return responses[0]
 
-    async def run_batch(self, requests: list[PromptRequest]) -> list[CouncilResponse]:
+    async def run(self, request: PromptRequest) -> OrchestratorResponse:
+        return (await self.run_council(request)).winner
+
+    async def run_batch(self, requests: list[PromptRequest]) -> list[OrchestratorResponse]:
+        responses = await self.run_batch_council(requests)
+        return [response.winner for response in responses]
+
+    async def run_batch_council(self, requests: list[PromptRequest]) -> list[CouncilResponse]:
         """Batched two-phase execution; see module docstring."""
         if not requests:
             return []

@@ -1,5 +1,5 @@
 from council_policies.decomposer import Decomposer, PassthroughDecomposer
-from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
+from council_policies.models import BenchmarkPolicy, TASK_TO_ROLE, CouncilResponse, TaskType
 from council_policies.p2_policy import (
     DatasetCouncilPolicy,
     DatasetVoteSummary,
@@ -25,6 +25,7 @@ from council_policies.voter import run_vote
 
 __all__ = [
     "CouncilResponse",
+    "BenchmarkPolicy",
     "DatasetCouncilPolicy",
     "DatasetVoteSummary",
     "Decomposer",
