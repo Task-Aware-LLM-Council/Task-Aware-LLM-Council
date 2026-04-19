@@ -112,16 +112,10 @@ def test_default_config_exposes_expected_roles_and_aliases() -> None:
     config = build_default_orchestrator_config(provider=Provider.OPENAI_COMPATIBLE)
 
     assert config.default_role == "general"
-    assert tuple(spec.role for spec in config.models) == (
-        "qa",
-        "reasoning",
-        "general",
-        "synthesizer",
-    )
+    assert tuple(spec.role for spec in config.models) == ("qa", "reasoning", "general")
     assert config.models[0].model == "google/gemma-2-9b-it"
     assert config.models[1].aliases == ("reasoning", "math", "code")
     assert config.models[2].aliases == ("general", "fever")
-    assert config.models[3].aliases == ("synthesizer",)
     assert config.mode_label == "http"
 
 
@@ -135,11 +129,10 @@ def test_default_local_vllm_config_uses_benchmark_aligned_params_and_distinct_po
         Provider.LOCAL,
         Provider.LOCAL,
         Provider.LOCAL,
-        Provider.LOCAL,
     )
 
     ports = [spec.provider_config.default_params[LOCAL_LAUNCH_PORT] for spec in config.models]
-    assert ports == [8000, 8001, 8002, 8003]
+    assert ports == [8000, 8001, 8002]
 
     qa_params = config.models[0].provider_config.default_params
     assert qa_params[LOCAL_LAUNCH_IMAGE] == "vllm-openai_latest.sif"
@@ -159,13 +152,11 @@ def test_default_orchestrator_config_uses_local_vllm_preset_for_local_provider()
         Provider.LOCAL,
         Provider.LOCAL,
         Provider.LOCAL,
-        Provider.LOCAL,
     )
     assert [spec.provider_config.default_params[LOCAL_LAUNCH_PORT] for spec in config.models] == [
         8000,
         8001,
         8002,
-        8003,
     ]
 
 
