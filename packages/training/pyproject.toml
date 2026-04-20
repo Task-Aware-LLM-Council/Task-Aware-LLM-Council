@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "common",
     "council-policies",
+    "llm-gateway",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,10 @@ router = [
     "scikit-learn>=1.3",
     "numpy>=1.26",
 ]
+decomposer-router = [
+    "datasets>=2.19",
+    "huggingface-hub>=0.23",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]
@@ -28,3 +33,4 @@ build-backend = "uv_build"
 [tool.uv.sources]
 common = { workspace = true }
 council-policies = { workspace = true }
+llm-gateway = { workspace = true }
