@@ -1,15 +1,16 @@
-"""Scan p4_gemma_zeroshot.jsonl — decide whether zero-shot Gemma is good enough.
+"""Scan a p4_*.jsonl — aggregate stats + 5 sample rows.
 
-Prints aggregate stats (role distribution, subtask count, errors, synth rate,
-latency) plus 5 sample rows with question/route/answer/gold truncated for
-readability. Run from repo root on CARC:
-
-    python scratch/inspect_p4_zeroshot.py
+Usage:
+    python scratch/inspect_p4_zeroshot.py                      # default: p4_gemma_zeroshot.jsonl
+    python scratch/inspect_p4_zeroshot.py p4_gemma_lora.jsonl  # compare the LoRA run
 """
 import json
+import sys
 from collections import Counter
 
-rows = [json.loads(l) for l in open("p4_gemma_zeroshot.jsonl")]
+path = sys.argv[1] if len(sys.argv) > 1 else "p4_gemma_zeroshot.jsonl"
+print(f"=== {path} ===")
+rows = [json.loads(l) for l in open(path)]
 print("total:", len(rows))
 
 roles = Counter()
