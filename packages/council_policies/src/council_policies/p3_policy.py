@@ -350,7 +350,7 @@ class RuleBasedRoutingPolicy:
     # ── Public API ────────────────────────────────────────────────────────────
 
     async def run(
-        self, profiles: list[DatasetProfile] | None = None
+        self, cases: list[EvaluationCase] | None = None
     ) -> P3PolicyResult:
         """
         Sample questions from all dataset profiles, route each to the
@@ -359,17 +359,16 @@ class RuleBasedRoutingPolicy:
         Args:
             profiles: Defaults to all available profiles when None.
         """
-        if profiles is None:
-            profiles = load_all_profiles()
+        # if profiles is None:
+        #     profiles = load_all_profiles()
 
-        cases = self.sample_cases(profiles)
-        if not cases:
-            logger.warning("No cases sampled — check that profiles are non-empty.")
-            return P3PolicyResult()
+        # cases = self.sample_cases(profiles)
+        # if not cases:
+        #     logger.warning("No cases sampled — check that profiles are non-empty.")
+        #     return P3PolicyResult()
 
-        logger.info(
-            "P3 RuleBasedRoutingPolicy: %d questions, %d datasets, fallback=%r",
-            len(cases), len(profiles), self.fallback_role,
+        logger.info("P3 RuleBasedRoutingPolicy: %d questions, fallback=%r",len(cases),
+                     self.fallback_role,
         )
 
         outcomes = await asyncio.gather(*[self._run_question(c) for c in cases])
