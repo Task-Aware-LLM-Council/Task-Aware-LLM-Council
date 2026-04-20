@@ -89,6 +89,10 @@ def parse_args() -> argparse.Namespace:
                    help="HF hub ID or local path of the joint decomposer+router "
                         "model. Defaults to google/gemma-2-2b-it for zero-shot "
                         "evaluation; swap for a fine-tuned artifact once trained.")
+    p.add_argument("--peft-adapter", default=None,
+                   help="Optional LoRA adapter directory (e.g. "
+                        "artifacts/decomposer_router_causal/adapter) to load "
+                        "on top of --model-dir. Omit for zero-shot.")
     p.add_argument("--dataset", default="task-aware-llm-council/router_dataset",
                    help="HF dataset name for evaluation prompts.")
     p.add_argument("--split", default="test")
@@ -123,8 +127,11 @@ async def main() -> int:
     # which doesn't fit next to three quantized specialists on a 44GB A40.
     # CPU adds ~500-1500ms per decompose call, tolerated at smoke-bench scale.
     # Flip to device="cuda" once specialists stop co-residing (or int8 Gemma).
-    print(f"Loading joint decomposer+router from {args.model_dir} (device=cpu)")
-    generate_fn = HFCausalGenerate(args.model_dir, device="cpu")
+    print(f"Loading joint decomposer+router from {args.model_dir} "
+          f"(adapter={args.peft_adapter or 'none'}, device=cpu)")
+    generate_fn = HFCausalGenerate(
+        args.model_dir, peft_adapter=args.peft_adapter, device="cpu",
+    )
     decomposer = Seq2SeqDecomposerRouter(
         generate_fn=generate_fn,
         max_subtasks=args.max_subtasks,
