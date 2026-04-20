@@ -106,3 +106,58 @@ class RouterCard:
             )
         raw["roles"] = tuple(raw["roles"])
         return cls(**raw)
+
+
+@dataclass(slots=True)
+class DecomposerRouterCard:
+    """Metadata + runtime config for the joint decomposer+router
+    seq2seq artifact (Flan-T5-small fine-tune).
+
+    Consumers:
+      * `training.train_decomposer_router` writes one per training run.
+      * `Seq2SeqDecomposerRouter`'s HF adapter reads it to confirm the
+        role vocab and input-format version match serving-time
+        featurize — mismatches silently wreck accuracy.
+
+    Two fields distinguish this card from `RouterCard`:
+
+    `input_format_version`
+        String tag that changes whenever the serve-time `featurize(...)`
+        contract changes. `"featurize_v1"` = current contract (prompt
+        with optional `Context:` prefix, `DEFAULT_CONTEXT_CHAR_CAP`).
+        Bump if the function's output format changes.
+    `generation_config`
+        Generation defaults the artifact was evaluated with, mirrored
+        into `generation_config.json` next to the model weights so HF
+        `from_pretrained(...).generate()` picks them up by default.
+        Typical keys: `num_beams`, `max_new_tokens`, `do_sample`.
+    """
+
+    model_version: str
+    base_model: str
+    roles: tuple[str, ...]
+    dataset_revision: str = ""
+    input_format_version: str = "featurize_v1"
+    generation_config: dict[str, object] = field(default_factory=dict)
+    metrics: dict[str, object] = field(default_factory=dict)
+    training_config: dict[str, object] = field(default_factory=dict)
+    git_sha: str = ""
+    schema_version: int = CARD_SCHEMA_VERSION
+
+    def save(self, path: str | Path) -> None:
+        payload = asdict(self)
+        payload["roles"] = list(self.roles)
+        Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+    @classmethod
+    def load(cls, path: str | Path) -> DecomposerRouterCard:
+        raw = json.loads(Path(path).read_text())
+        version = raw.get("schema_version", 0)
+        if version > CARD_SCHEMA_VERSION:
+            raise ValueError(
+                f"DecomposerRouterCard at {path} has schema_version={version}, "
+                f"but this code only understands up to "
+                f"{CARD_SCHEMA_VERSION}. Upgrade the library before loading."
+            )
+        raw["roles"] = tuple(raw["roles"])
+        return cls(**raw)

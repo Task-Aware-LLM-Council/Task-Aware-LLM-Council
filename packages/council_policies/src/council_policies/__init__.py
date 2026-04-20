@@ -44,7 +44,11 @@ from council_policies.router import (
     ScoreFn,
     Subtask,
 )
-from council_policies.router_card import CARD_SCHEMA_VERSION, RouterCard
+from council_policies.router_card import (
+    CARD_SCHEMA_VERSION,
+    DecomposerRouterCard,
+    RouterCard,
+)
 from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
 from council_policies.router_labels import (
     DEFAULT_FALLBACK_ROLE,
@@ -70,6 +74,7 @@ __all__ = [
     "CARD_SCHEMA_VERSION",
     "DEFAULT_CONTEXT_CHAR_CAP",
     "DEFAULT_FALLBACK_ROLE",
+    "DecomposerRouterCard",
     "KeywordRouter",
     "LearnedRouter",
     "LearnedRouterPolicy",
