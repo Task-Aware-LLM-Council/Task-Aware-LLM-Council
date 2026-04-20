@@ -1,0 +1,1 @@
+{"question": "Compute 2+2, then explain whether 4 is prime.", "context": "", "skill_tags": ["math", "qa_reasoning"], "targets": [{"role": "math_code", "subtask": "Compute 2+2."}, {"role": "qa_reasoning", "subtask": "Explain whether 4 is prime."}]}
