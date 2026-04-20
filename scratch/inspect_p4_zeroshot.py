@@ -22,7 +22,10 @@ for r in rows:
     n_subtasks[len(pr) if isinstance(pr, list) else 0] += 1
     if isinstance(pr, list):
         for s in pr:
-            roles[s.get("role", "?")] += 1
+            if isinstance(s, dict):
+                roles[s.get("role", "?")] += 1
+            else:
+                roles[str(s)] += 1
     if r.get("error"):
         errors += 1
     if r.get("synthesis_used"):
