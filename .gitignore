@@ -212,3 +212,6 @@ data/
 
 .codex
 results
+
+# Local scratch notes / design docs
+scratch/
