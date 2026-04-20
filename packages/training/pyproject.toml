@@ -17,6 +17,7 @@ dependencies = [
 router = [
     "torch>=2.2",
     "transformers>=4.52.4",
+    "accelerate>=0.26",
     "datasets>=2.19",
     "scikit-learn>=1.3",
     "numpy>=1.26",
