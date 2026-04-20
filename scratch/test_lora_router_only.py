@@ -49,7 +49,7 @@ async def main() -> None:
         print(f"Q: {prompt}")
         targets = await decomposer.decompose(prompt, context="")
         for t in targets:
-            print(f"  -> {t.role}: {t.subtask}")
+            print(f"  -> [{t.suggested_role}] {t.text}")
         print()
 
 
