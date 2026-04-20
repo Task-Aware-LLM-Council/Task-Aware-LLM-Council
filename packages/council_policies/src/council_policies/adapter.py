@@ -10,7 +10,7 @@ from council_policies.p2.policy import _majority, _parse_vote
 from council_policies.p2.prompts import ROLE_TO_LABEL, build_vote_prompt, build_synthesis_prompt
 
 _ROLES = ("qa", "reasoning", "general")
-_CALL_TIMEOUT_SECONDS = 90
+_CALL_TIMEOUT_SECONDS = 300  # 5 min — covers vLLM cold inference; NVIDIA uses asyncio.wait_for to fail fast
 
 
 class P2PolicyClient:

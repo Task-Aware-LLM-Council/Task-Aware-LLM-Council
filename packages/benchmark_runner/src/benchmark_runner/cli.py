@@ -201,6 +201,11 @@ async def _run_p2(spec, args):
     spec = dc_replace(spec, models=(_P2_COUNCIL_MODEL,), provider_config=dummy_provider_config)
 
     async with ModelOrchestrator(orchestrator_config) as orch:
+        # Pre-warm all 3 vLLM servers in parallel before inference starts
+        print("[P2] Loading all specialist models...")
+        await orch.load_all()
+        print("[P2] All models ready.")
+
         client = P2PolicyClient(orch, model_name=_P2_COUNCIL_MODEL)
 
         async def pipeline_runner(datasets, pipeline_config):
