@@ -255,8 +255,11 @@ def _compute_metrics_fn(tokenizer: Any, role_labels: tuple[str, ...]):
     def compute_metrics(eval_pred: Any) -> dict[str, float]:
         preds, labels = eval_pred
         # `predict_with_generate=True` produces token IDs directly; the
-        # pad token for labels is -100 → replace before decoding.
+        # pad token for labels is -100 → replace before decoding. Accelerate's
+        # gather on ragged batches can also stamp -100 into preds, so clean
+        # both sides before handing to the tokenizer.
         labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+        preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
