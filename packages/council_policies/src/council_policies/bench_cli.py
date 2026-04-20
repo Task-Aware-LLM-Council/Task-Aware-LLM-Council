@@ -28,7 +28,8 @@ import logging
 from pathlib import Path
 
 from llm_gateway import Provider
-from model_orchestration import ModelOrchestrator, build_default_orchestrator_config
+from model_orchestration import ModelOrchestrator, build_default_orchestrator_config, build_default_local_vllm_orchestrator_config
+from model_orchestration.models import LocalVLLMPresetConfig
 from task_eval import get_dataset_profile
 
 from council_policies.p2_benchmark import run_p2_benchmark_suite
@@ -73,6 +74,7 @@ _PROVIDER_ENUM = {
     "openai": Provider.OPENAI,
     "huggingface": Provider.HUGGINGFACE,
     "nvidia": Provider.OPENAI_COMPATIBLE,
+    "local": Provider.LOCAL,
 }
 
 _ALL_DATASETS = ("musique", "quality", "fever", "hardmath", "humaneval_plus")
@@ -82,6 +84,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run P2 council benchmark (same datasets as P1)")
     parser.add_argument("--provider", default="openrouter", choices=list(_PROVIDER_ENUM))
     parser.add_argument("--api-base", default=None, help="Override API base URL (auto-set for nvidia)")
+    parser.add_argument("--base-port", type=int, default=8000, help="Base port for local vllm (roles use base, base+1, base+2)")
     parser.add_argument("--qa-model", default=None)
     parser.add_argument("--reasoning-model", default=None)
     parser.add_argument("--general-model", default=None)
@@ -95,18 +98,27 @@ def _parse_args() -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> None:
     provider_name = args.provider
-    defaults = _DEFAULT_MODELS[provider_name]
     provider = _PROVIDER_ENUM[provider_name]
-    api_base = args.api_base or (_NVIDIA_API_BASE if provider_name == "nvidia" else None)
 
-    config = build_default_orchestrator_config(
-        provider=provider,
-        api_base=api_base,
-        api_key_env=_API_KEY_ENV[provider_name],
-        qa_model=args.qa_model or defaults["qa"],
-        reasoning_model=args.reasoning_model or defaults["reasoning"],
-        general_model=args.general_model or defaults["general"],
-    )
+    if provider_name == "local":
+        from model_orchestration.defaults import vLLM_DEFAULT_QA_MODEL, vLLM_DEFAULT_REASONING_MODEL, vLLM_DEFAULT_GENERAL_MODEL
+        config = build_default_local_vllm_orchestrator_config(
+            qa_model=args.qa_model or vLLM_DEFAULT_QA_MODEL,
+            reasoning_model=args.reasoning_model or vLLM_DEFAULT_REASONING_MODEL,
+            general_model=args.general_model or vLLM_DEFAULT_GENERAL_MODEL,
+            preset=LocalVLLMPresetConfig(base_port=args.base_port),
+        )
+    else:
+        defaults = _DEFAULT_MODELS[provider_name]
+        api_base = args.api_base or (_NVIDIA_API_BASE if provider_name == "nvidia" else None)
+        config = build_default_orchestrator_config(
+            provider=provider,
+            api_base=api_base,
+            api_key_env=_API_KEY_ENV[provider_name],
+            qa_model=args.qa_model or defaults["qa"],
+            reasoning_model=args.reasoning_model or defaults["reasoning"],
+            general_model=args.general_model or defaults["general"],
+        )
 
     dataset_names = args.datasets or list(_ALL_DATASETS)
 

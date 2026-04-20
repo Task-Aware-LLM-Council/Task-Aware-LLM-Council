@@ -1,0 +1,17 @@
+{
+  "aggregated_metrics": {
+    "exact_match": 0.0,
+    "token_f1": 0.4583333333333333
+  },
+  "council_winner": "qa",
+  "dataset_name": "quality",
+  "failed_examples": 0,
+  "scored_examples": 2,
+  "scores_by_role": {
+    "general": 5.5,
+    "qa": 6.75,
+    "reasoning": 3.25
+  },
+  "suite_id": "p2_suite_20260419T065945Z",
+  "total_examples": 2
+}
