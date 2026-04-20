@@ -13,6 +13,8 @@ dependencies = [
     "task-eval",
     "datasets>=4.0.0",
     "common",
+    "council-policies",
+    "model-orchestration",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +34,8 @@ benchmarking-pipeline = { workspace = true }
 llm-gateway = { workspace = true }
 task-eval = { workspace = true }
 common = { workspace = true }
+council-policies = { workspace = true }
+model-orchestration = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]

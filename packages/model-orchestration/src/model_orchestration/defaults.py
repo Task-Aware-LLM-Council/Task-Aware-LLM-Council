@@ -54,6 +54,8 @@ def build_default_orchestrator_config(
     general_model: str = API_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
+    timeout_seconds: float = 900.0,
+    max_retries: int = 3,
 ) -> OrchestratorConfig:
     normalized_provider = provider.value if isinstance(provider, Provider) else str(provider).strip().lower()
     if normalized_provider == Provider.LOCAL.value and api_base is None:
@@ -81,6 +83,8 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=qa_model,
                     provider_defaults=provider_defaults,
+                    timeout_seconds=timeout_seconds,
+                    max_retries=max_retries,
                 ),
             ),
             ModelSpec(
@@ -94,6 +98,8 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=reasoning_model,
                     provider_defaults=provider_defaults,
+                    timeout_seconds=timeout_seconds,
+                    max_retries=max_retries,
                 ),
             ),
             ModelSpec(
@@ -107,6 +113,8 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=general_model,
                     provider_defaults=provider_defaults,
+                    timeout_seconds=timeout_seconds,
+                    max_retries=max_retries,
                 ),
             ),
         ),
@@ -188,6 +196,8 @@ def _provider_config(
     api_key_env: str | None,
     model: str,
     provider_defaults: dict[str, object],
+    timeout_seconds: float = 900.0,
+    max_retries: int = 3,
 ) -> ProviderConfig:
     return ProviderConfig(
         provider=provider,
@@ -195,6 +205,8 @@ def _provider_config(
         api_key_env=api_key_env,
         default_model=model,
         default_params=dict(provider_defaults),
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
     )
 
 

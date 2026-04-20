@@ -9,6 +9,7 @@ from task_eval.profiles import (
     HumanEvalPlusProfile,
     MusiqueProfile,
     QualityProfile,
+    RouterDatasetProfile,
 )
 
 
@@ -18,6 +19,7 @@ PROFILE_TYPES = {
     "fever": FeverProfile,
     "hardmath": HardMathProfile,
     "humaneval_plus": HumanEvalPlusProfile,
+    "router_dataset": RouterDatasetProfile,
 }
 
 

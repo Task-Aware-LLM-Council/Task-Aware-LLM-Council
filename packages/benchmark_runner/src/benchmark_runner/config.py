@@ -32,6 +32,10 @@ DATASET_CONFIGS: tuple[DatasetRunConfig, ...] = (
     DatasetRunConfig(name="humaneval_plus", split="test"),
 )
 
+P2_DATASET_CONFIGS: tuple[DatasetRunConfig, ...] = (
+    DatasetRunConfig(name="router_dataset", split="validation"),
+)
+
 
 def default_provider_config(
     *,

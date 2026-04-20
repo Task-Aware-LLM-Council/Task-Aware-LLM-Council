@@ -372,3 +372,160 @@ class HumanEvalPlusProfile(BaseDatasetProfile):
             },
             metadata={"extracted_answer": extracted},
         )
+
+
+_MUSIQUE_NOT_PRESENT = "NOT PRESENT IN CONTEXT"
+
+
+@dataclass(slots=True)
+class RouterDatasetProfile(BaseDatasetProfile):
+    """
+    Profile for task-aware-llm-council/router_dataset on HuggingFace.
+    A mixed dataset covering QA, fact-verification, math, and code.
+    Each example gets the same constrained prompt as its source P1 dataset,
+    and is scored with the matching P1 metric.
+    """
+
+    name: str = "router_dataset"
+    metric_names: tuple[str, ...] = ("token_f1", "exact_match", "label_accuracy", "math_exact_match", "pass_at_1")
+    primary_metric: str = "token_f1"
+    dataset_name: str = "task-aware-llm-council/router_dataset"
+    split: str = "validation"
+
+    def row_to_case(self, row: dict[str, Any], index: int) -> EvaluationCase:
+        example_id = str(row.get("id", index))
+        raw_question = str(row.get("question", ""))
+        context = row.get("context") or None
+        skill_tags: list[str] = row.get("skill_tags") or []
+        source_dataset = str(row.get("source_dataset", "")).lower()
+
+        question, context, metric, reference = _build_prompt_and_reference(
+            raw_question, context, skill_tags, source_dataset, row
+        )
+
+        return EvaluationCase(
+            example=BenchmarkExample(
+                example_id=example_id,
+                dataset_name=self.name,
+                question=question,
+                context=context,
+                metadata={
+                    "source_dataset": source_dataset,
+                    "skill_tags": skill_tags,
+                    "profile": self.name,
+                },
+            ),
+            reference={"metric": metric, **reference},
+            metadata={"raw_row": row},
+        )
+
+    def score(self, *, case: EvaluationCase, prediction: PredictionRecord, dataset_metadata=None) -> MetricResult:
+        text = self._prediction_text(prediction)
+        metric = str(case.reference.get("metric", "token_f1"))
+
+        if metric == "musique_token_f1":
+            extracted = extract_qa_answer_musique(text)
+            answers = [str(a) for a in case.reference.get("answers", [])]
+            return MetricResult(
+                values={
+                    "exact_match": exact_match_multi(extracted, answers),
+                    "token_f1": token_f1_multi(extracted, answers),
+                },
+                metadata={"extracted_answer": extracted, "metric": metric},
+            )
+
+        if metric == "token_f1":
+            extracted = extract_qa_answer(text)
+            answers = [str(a) for a in case.reference.get("answers", [])]
+            return MetricResult(
+                values={
+                    "exact_match": exact_match_multi(extracted, answers),
+                    "token_f1": token_f1_multi(extracted, answers),
+                },
+                metadata={"extracted_answer": extracted, "metric": metric},
+            )
+
+        if metric == "label_accuracy":
+            extracted = extract_fever_label(text)
+            reference = str(case.reference.get("label", ""))
+            return MetricResult(
+                values={"label_accuracy": label_accuracy(extracted, reference)},
+                metadata={"extracted_answer": extracted, "metric": metric},
+            )
+
+        if metric == "math_exact_match":
+            extracted = extract_math_answer(text)
+            reference = str(case.reference.get("answer", ""))
+            return MetricResult(
+                values={"math_exact_match": math_exact_match(extracted, reference)},
+                metadata={"extracted_answer": extracted, "metric": metric},
+            )
+
+        if metric == "pass_at_1":
+            extracted = extract_code_answer(text)
+            return MetricResult(
+                values={"pass_at_1": pass_at_1(
+                    extracted,
+                    test_code=str(case.reference.get("test_code", "")),
+                    entry_point=str(case.reference.get("entry_point", "")),
+                )},
+                metadata={"extracted_answer": extracted, "metric": metric},
+            )
+
+        # Fallback
+        extracted = extract_qa_answer(text)
+        return MetricResult(
+            values={"token_f1": token_f1_multi(extracted, [])},
+            metadata={"extracted_answer": extracted, "metric": metric},
+        )
+
+
+def _build_prompt_and_reference(
+    question: str,
+    context: str | None,
+    skill_tags: list[str],
+    source_dataset: str,
+    row: dict[str, Any],
+) -> tuple[str, str | None, str, dict[str, Any]]:
+    """
+    Returns (constrained_question, context, metric_key, reference_dict)
+    matching the P1 prompt format for each source dataset.
+    """
+    gold_answer = str(row.get("gold_answer") or "")
+
+    if "musique" in source_dataset:
+        # MuSiQue: chain-of-thought, context embedded in the question
+        constrained = (
+            "You are a strict reading comprehension assistant. You must analyze the context and think step-by-step out loud before answering.\n\n"
+            "RULES:\n"
+            "1. You must ONLY use the information provided in the Context. Do NOT use general knowledge.\n"
+            "2. The answer is ALWAYS hidden somewhere in the text. You must search carefully.\n\n"
+            f"Context:\n{context or ''}\n\n"
+            f"Question: {question}\n\n"
+            "Write your step-by-step reasoning inside <scratchpad> tags. "
+            "After you are done thinking, conclude your response on a new line with the exact format: 'Final Answer: <exact entity name>'. "
+            f"If the answer is completely missing, output 'Final Answer: {_MUSIQUE_NOT_PRESENT}'."
+        )
+        return constrained, None, "musique_token_f1", {"answers": [gold_answer]}
+
+    if "fever" in source_dataset or "fact-verification" in skill_tags:
+        gold_label = str(row.get("gold_label") or "")
+        constrained = (
+            f"Claim: {question}\n\n"
+            "Based on the provided context, verify the claim. "
+            "Answer strictly with one of these three labels: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+        )
+        return constrained, context, "label_accuracy", {"label": gold_label}
+
+    if "math" in source_dataset or "math" in skill_tags:
+        constrained = question + "\n\nPlease put your final answer enclosed in \\boxed{}."
+        return constrained, context, "math_exact_match", {"answer": gold_answer}
+
+    if "humaneval" in source_dataset or "code" in skill_tags:
+        unit_tests = str(row.get("unit_tests") or "")
+        entry_point = str(row.get("entry_point") or "")
+        return question, context, "pass_at_1", {"test_code": unit_tests, "entry_point": entry_point}
+
+    # narrativeqa / quality — concise answer format
+    constrained = question + "\n\nAnswer the question concisely with just the answer."
+    return constrained, context, "token_f1", {"answers": [gold_answer]}
