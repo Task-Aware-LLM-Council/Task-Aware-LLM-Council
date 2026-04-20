@@ -61,7 +61,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_DATASET = "task-aware-llm-council/decomposer-router-dataset"
 DEFAULT_BASE_MODEL = "google/flan-t5-small"
 DEFAULT_SEED = 42
-INPUT_PREFIX = "decompose_and_route: "
 INPUT_FORMAT_VERSION = "featurize_v1"
 
 # Same JSON-array regex used in decomposer.py / build script — keep the
@@ -162,15 +161,17 @@ def _seed_everything(seed: int) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _featurize_row(row: dict[str, Any], featurize_fn: Any) -> str:
-    """Serve-time-identical input format. Keeping this a thin wrapper
-    makes the `decompose_and_route:` prefix grep-able from both the
-    training script and the serving class."""
+def _featurize_row(
+    row: dict[str, Any], featurize_fn: Any, *, input_prefix: str,
+) -> str:
+    """Serve-time-identical input format. `input_prefix` is passed in
+    rather than imported at module top so this file stays importable
+    without council_policies installed (e.g. for linting)."""
     base = featurize_fn(
         row.get("question") or "",
         row.get("context") or "",
     )
-    return INPUT_PREFIX + base
+    return input_prefix + base
 
 
 def _target_text(row: dict[str, Any]) -> str:
@@ -333,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         Seq2SeqTrainingArguments,
     )
 
-    from council_policies import DecomposerRouterCard
+    from council_policies import DecomposerRouterCard, INPUT_PREFIX
     from council_policies.router_featurize import (
         DEFAULT_CONTEXT_CHAR_CAP,
         featurize,
@@ -362,7 +363,9 @@ def main(argv: list[str] | None = None) -> int:
             targets: list[str] = []
             for i in range(len(batch["question"])):
                 row = {k: batch[k][i] for k in batch}
-                inputs.append(_featurize_row(row, featurize))
+                inputs.append(
+                    _featurize_row(row, featurize, input_prefix=INPUT_PREFIX)
+                )
                 targets.append(_target_text(row))
             model_inputs = tokenizer(
                 inputs,

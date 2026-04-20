@@ -86,6 +86,89 @@ needs to answer it without seeing the other subtasks.
 _JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
 
 
+def _parse_subtask_array(
+    text: str, *, fallback_prompt: str, max_subtasks: int,
+) -> list[Subtask]:
+    """Extract a JSON array of `{"role", "subtask"}` objects from an LLM
+    or seq2seq-model response into an ordered list of `Subtask`s.
+
+    Shared between `LLMDecomposer` (external LLM decomposer) and
+    `Seq2SeqDecomposerRouter` (the joint seq2seq model), so both honor
+    the same fallback ladder:
+
+      - no JSON array found             → single-passthrough Subtask
+      - JSON decode failure             → single-passthrough Subtask
+      - parsed value is not a list      → single-passthrough Subtask
+      - list item not a dict            → skip item
+      - item missing/empty `subtask`    → skip item
+      - no usable items after filtering → single-passthrough Subtask
+
+    `role` is passed through verbatim as `suggested_role` (after strip);
+    role-vocab validation is the caller's responsibility — the parser
+    doesn't know which label space is canonical.
+    """
+    match = _JSON_ARRAY_RE.search(text)
+    if not match:
+        logger.warning(
+            "subtask parse: no JSON array in response; "
+            "falling back to passthrough. raw=%r",
+            text[:200],
+        )
+        return [Subtask(text=fallback_prompt, order=0)]
+
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "subtask parse: JSON decode failed (%s); falling back. raw=%r",
+            exc, match.group(0)[:200],
+        )
+        return [Subtask(text=fallback_prompt, order=0)]
+
+    if not isinstance(parsed, list):
+        logger.warning(
+            "subtask parse: parsed JSON is %s, not list; falling back.",
+            type(parsed).__name__,
+        )
+        return [Subtask(text=fallback_prompt, order=0)]
+
+    subtasks: list[Subtask] = []
+    for index, item in enumerate(parsed):
+        if not isinstance(item, dict):
+            logger.warning(
+                "subtask parse: item %d is %s, not object; skipping.",
+                index, type(item).__name__,
+            )
+            continue
+        subtask_text = str(item.get("subtask", "")).strip()
+        if not subtask_text:
+            logger.warning(
+                "subtask parse: item %d has no 'subtask' field; skipping.",
+                index,
+            )
+            continue
+        role_hint = item.get("role")
+        role_value = str(role_hint).strip() if role_hint is not None else ""
+        subtasks.append(
+            Subtask(
+                text=subtask_text,
+                order=len(subtasks),
+                suggested_role=role_value or None,
+            )
+        )
+        if len(subtasks) >= max_subtasks:
+            break
+
+    if not subtasks:
+        logger.warning(
+            "subtask parse: parsed list contained no usable items; "
+            "falling back to passthrough."
+        )
+        return [Subtask(text=fallback_prompt, order=0)]
+
+    return subtasks
+
+
 class LLMDecomposer:
     """
     LLM-backed decomposer. Calls a `BaseLLMClient` once per `decompose()`
@@ -169,73 +252,11 @@ class LLMDecomposer:
         return "\n\n".join(parts)
 
     def _parse_response(self, text: str, *, fallback_prompt: str) -> list[Subtask]:
-        """Extract a JSON array of `{"role", "subtask"}` objects from
-        the LLM response.
-
-        Defensive parse: accepts bare arrays, markdown-fenced arrays,
-        arrays embedded in prose. Falls back to a single-subtask
-        passthrough on any failure. Items missing `subtask` are
-        skipped; items missing `role` are kept with `suggested_role=None`.
-        """
-        match = _JSON_ARRAY_RE.search(text)
-        if not match:
-            logger.warning(
-                "LLMDecomposer: no JSON array found in response; "
-                "falling back to passthrough. raw=%r",
-                text[:200],
-            )
-            return [Subtask(text=fallback_prompt, order=0)]
-
-        try:
-            parsed = json.loads(match.group(0))
-        except json.JSONDecodeError as exc:
-            logger.warning(
-                "LLMDecomposer: JSON decode failed (%s); falling back. raw=%r",
-                exc,
-                match.group(0)[:200],
-            )
-            return [Subtask(text=fallback_prompt, order=0)]
-
-        if not isinstance(parsed, list):
-            logger.warning(
-                "LLMDecomposer: parsed JSON is %s, not list; falling back.",
-                type(parsed).__name__,
-            )
-            return [Subtask(text=fallback_prompt, order=0)]
-
-        subtasks: list[Subtask] = []
-        for index, item in enumerate(parsed):
-            if not isinstance(item, dict):
-                logger.warning(
-                    "LLMDecomposer: item %d is %s, not object; skipping.",
-                    index,
-                    type(item).__name__,
-                )
-                continue
-            subtask_text = str(item.get("subtask", "")).strip()
-            if not subtask_text:
-                logger.warning(
-                    "LLMDecomposer: item %d has no 'subtask' field; skipping.",
-                    index,
-                )
-                continue
-            role_hint = item.get("role")
-            role_value = str(role_hint).strip() if role_hint is not None else ""
-            subtasks.append(
-                Subtask(
-                    text=subtask_text,
-                    order=len(subtasks),
-                    suggested_role=role_value or None,
-                )
-            )
-            if len(subtasks) >= self.max_subtasks:
-                break
-
-        if not subtasks:
-            logger.warning(
-                "LLMDecomposer: parsed list contained no usable items; "
-                "falling back to passthrough."
-            )
-            return [Subtask(text=fallback_prompt, order=0)]
-
-        return subtasks
+        """Thin wrapper over the shared `_parse_subtask_array` helper so
+        `LLMDecomposer` and `Seq2SeqDecomposerRouter` share one parser +
+        fallback ladder."""
+        return _parse_subtask_array(
+            text,
+            fallback_prompt=fallback_prompt,
+            max_subtasks=self.max_subtasks,
+        )
