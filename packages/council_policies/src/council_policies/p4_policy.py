@@ -57,6 +57,7 @@ from council_policies.policy_runner import (
     sum_usage,
 )
 from council_policies.router import DispatchRun, RoutingDecision, Router, Subtask
+from council_policies.router_labels import ROLE_LABELS
 from council_policies.synthesis import synthesize_ordered
 
 logger = logging.getLogger(__name__)
@@ -94,19 +95,41 @@ class LearnedRouterPolicy(BasePolicyAdapter):
     def __init__(
         self,
         *,
-        router: Router,
+        router: Router | None = None,
         decomposer: Decomposer | None = None,
         fallback_role: str = "fact_general",
         synthesizer_role: str = "synthesizer",
         max_subtasks: int = 4,
+        use_joint_model: bool = False,
     ) -> None:
         if max_subtasks < 1:
             raise ValueError(f"max_subtasks must be >= 1, got {max_subtasks}")
+        if use_joint_model:
+            if router is not None:
+                raise ValueError(
+                    "LearnedRouterPolicy(use_joint_model=True): `router` "
+                    "must be None — the joint decomposer emits routing "
+                    "decisions directly via Subtask.suggested_role."
+                )
+            if decomposer is None:
+                raise ValueError(
+                    "LearnedRouterPolicy(use_joint_model=True): `decomposer` "
+                    "is required — pass a Seq2SeqDecomposerRouter (or any "
+                    "Decomposer that populates Subtask.suggested_role)."
+                )
+        else:
+            if router is None:
+                raise ValueError(
+                    "LearnedRouterPolicy(use_joint_model=False): `router` "
+                    "is required. Pass `use_joint_model=True` only when "
+                    "routing is handled by the decomposer itself."
+                )
         self.router = router
         self.decomposer = decomposer or PassthroughDecomposer()
         self.fallback_role = fallback_role
         self.synthesizer_role = synthesizer_role
         self.max_subtasks = max_subtasks
+        self.use_joint_model = use_joint_model
 
     async def plan(
         self,
@@ -127,7 +150,10 @@ class LearnedRouterPolicy(BasePolicyAdapter):
         decisions: list[RoutingDecision] = []
         runs: list[DispatchRun] = []
         for subtask in subtasks:
-            decision = self.router.classify(subtask.text, context=context_text)
+            if self.use_joint_model:
+                decision = self._decision_from_joint_model(subtask)
+            else:
+                decision = self.router.classify(subtask.text, context=context_text)
             role = self._resolve_role(decision.role, runtime)
             resolved_decision = RoutingDecision(
                 role=role,
@@ -200,7 +226,11 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 "predicted_route": (
                     runs[0].role if len(runs) == 1 else [r.role for r in runs]
                 ),
-                "router_type": type(self.router).__name__,
+                "router_type": (
+                    "Seq2SeqDecomposerRouter"
+                    if self.use_joint_model
+                    else type(self.router).__name__
+                ),
             },
         )
 
@@ -275,6 +305,32 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 "synthesis_used_fallback": synthesis_result.used_fallback,
             },
             metrics=metrics,
+        )
+
+    def _decision_from_joint_model(self, subtask: Subtask) -> RoutingDecision:
+        hint = (subtask.suggested_role or "").strip()
+        if not hint:
+            return RoutingDecision(
+                role=self.fallback_role,
+                scores={},
+                confidence=0.0,
+                fallback_used=True,
+                fallback_reason="joint_model_missing_role",
+            )
+        if hint not in ROLE_LABELS:
+            return RoutingDecision(
+                role=self.fallback_role,
+                scores={},
+                confidence=0.0,
+                fallback_used=True,
+                fallback_reason="joint_model_unknown_role",
+            )
+        return RoutingDecision(
+            role=hint,
+            scores={hint: 1.0},
+            confidence=1.0,
+            fallback_used=False,
+            fallback_reason=None,
         )
 
     def _resolve_role(self, router_role: str, runtime: PolicyRuntime) -> str:
