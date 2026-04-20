@@ -166,12 +166,15 @@ async def test_plan_raises_when_primary_and_fallback_both_missing(
         decomposer=PassthroughDecomposer(),
     )
 
-    with pytest.raises(RuntimeError) as excinfo:
+    result = (
         await runner.run([PromptRequest(user_prompt="solve this math problem")])
+    ).results[0]
 
-    message = str(excinfo.value)
-    assert "math_code" in message
-    assert "fact_general" in message
+    # Runner captures per-policy failures instead of bubbling, so the
+    # error surfaces as structured metadata rather than an exception.
+    assert result.metrics.error == "RuntimeError"
+    assert "math_code" in result.metadata["error_message"]
+    assert "fact_general" in result.metadata["error_message"]
 
 
 @pytest.mark.asyncio
@@ -205,8 +208,11 @@ async def test_plan_raises_when_synthesizer_missing_and_synthesis_needed(
         decomposer=StubDecomposer(subtasks),
     )
 
-    with pytest.raises(RuntimeError, match="synthesizer_role"):
+    result = (
         await runner.run([PromptRequest(user_prompt="composite")])
+    ).results[0]
+    assert result.metrics.error == "RuntimeError"
+    assert "synthesizer_role" in result.metadata["error_message"]
 
 
 @pytest.mark.asyncio

@@ -11,14 +11,17 @@ from council_policies.p3_policy import classify_task
 from council_policies.policy_runner import (
     BasePolicyAdapter,
     PolicyExecutionState,
+    PolicyMetrics,
     PolicyResult,
     PolicyRuntime,
     SpecialistCache,
     SpecialistRequest,
+    aggregate_specialist_metrics,
     build_run_from_cached_response,
     build_specialist_cache_key,
     make_policy_result,
     orchestrator_to_prompt_response,
+    sum_usage,
 )
 from council_policies.prompts import (
     TIEBREAK_SYSTEM_PROMPT,
@@ -47,9 +50,13 @@ class P3Adapter(BasePolicyAdapter):
         runtime: PolicyRuntime,
     ) -> PolicyExecutionState:
         task_type = classify_task(request.user_prompt or "")
-        role = TASK_TO_ROLE[task_type]
-        if not runtime.has_specialist_role(role):
+        primary_role = TASK_TO_ROLE[task_type]
+        fallback_used = False
+        if runtime.has_specialist_role(primary_role):
+            role = primary_role
+        else:
             role = self.fallback_role
+            fallback_used = True
         specialist_request = SpecialistRequest(
             cache_key=build_specialist_cache_key(
                 self.policy_id,
@@ -67,6 +74,7 @@ class P3Adapter(BasePolicyAdapter):
             metadata={
                 "task_type": task_type.value,
                 "routed_role": role,
+                "router_fallback_used": fallback_used,
                 "synthesis_used": False,
             },
         )
@@ -80,9 +88,17 @@ class P3Adapter(BasePolicyAdapter):
         del runtime
         specialist_request = state.specialist_requests[0]
         response = cache.get(specialist_request.cache_key)
+        metrics = _single_specialist_metrics(
+            role=specialist_request.role,
+            response=response,
+            confidence=(
+                0.0 if state.metadata.get("router_fallback_used") else 1.0
+            ),
+        )
         return make_policy_result(
             state,
             response=orchestrator_to_prompt_response(response),
+            metrics=metrics,
         )
 
 
@@ -190,6 +206,11 @@ class P4Adapter(BasePolicyAdapter):
         runtime: PolicyRuntime,
     ) -> PolicyResult:
         run_payloads = list(state.metadata["runs"])
+        confidences = state.metadata.get("router_confidence") or []
+        confidence = (
+            sum(confidences) / len(confidences) if confidences else None
+        )
+
         if len(run_payloads) == 1:
             response = cache.get(run_payloads[0]["cache_key"])
             return make_policy_result(
@@ -199,11 +220,17 @@ class P4Adapter(BasePolicyAdapter):
                     metadata={"synthesis_short_circuit": "single_run"},
                 ),
                 extra_metadata={"synthesis_short_circuit": "single_run"},
+                metrics=_multi_specialist_metrics(
+                    responses_by_role={run_payloads[0]["role"]: [response]},
+                    confidence=confidence,
+                ),
             )
 
         runs: list[DispatchRun] = []
+        responses_by_role: dict[str, list] = {}
         for run_payload in run_payloads:
             response = cache.get(run_payload["cache_key"])
+            responses_by_role.setdefault(run_payload["role"], []).append(response)
             runs.append(
                 build_run_from_cached_response(
                     run_payload["role"],
@@ -219,6 +246,7 @@ class P4Adapter(BasePolicyAdapter):
             orchestrator=orchestrator,
             synthesizer_role=self.synthesizer_role,
         )
+        responses_by_role[self.synthesizer_role] = [synthesis_result.response]
         return make_policy_result(
             state,
             response=orchestrator_to_prompt_response(
@@ -232,6 +260,10 @@ class P4Adapter(BasePolicyAdapter):
                 "synthesis_short_circuit": synthesis_result.metadata.get("short_circuit"),
                 "synthesis_used_fallback": synthesis_result.used_fallback,
             },
+            metrics=_multi_specialist_metrics(
+                responses_by_role=responses_by_role,
+                confidence=confidence,
+            ),
         )
 
 
@@ -296,13 +328,15 @@ class P2PromptAdapter(BasePolicyAdapter):
             request.role: cache.get(request.cache_key)
             for request in state.specialist_requests
         }
-        winner_role, vote_tally = await self._run_vote(
+        winner_role, vote_tally, voter_responses = await self._run_vote(
             question=state.request.user_prompt or "",
             candidates=candidates,
             runtime=runtime,
         )
         state.metadata["vote_tally"] = vote_tally
         state.metadata["winner_role"] = winner_role
+        state.metadata["_voter_responses"] = voter_responses
+        state.metadata["_candidate_responses"] = candidates
         state.winner_response = candidates[winner_role]
         return state
 
@@ -315,9 +349,27 @@ class P2PromptAdapter(BasePolicyAdapter):
         del cache, runtime
         if state.winner_response is None:
             raise RuntimeError("P2PromptAdapter winner_response missing after specialist phase")
+
+        candidate_responses = state.metadata.pop("_candidate_responses", {})
+        voter_responses = state.metadata.pop("_voter_responses", [])
+        responses_by_role: dict[str, list] = {
+            role: [resp] for role, resp in candidate_responses.items()
+        }
+        if voter_responses:
+            responses_by_role["_voters"] = list(voter_responses)
+
+        tally = state.metadata.get("vote_tally") or {}
+        winner = state.metadata.get("winner_role")
+        total = sum(tally.values())
+        confidence = (tally.get(winner, 0) / total) if total else None
+
         return make_policy_result(
             state,
             response=orchestrator_to_prompt_response(state.winner_response),
+            metrics=_multi_specialist_metrics(
+                responses_by_role=responses_by_role,
+                confidence=confidence,
+            ),
         )
 
     async def _run_vote(
@@ -326,7 +378,7 @@ class P2PromptAdapter(BasePolicyAdapter):
         question: str,
         candidates: dict[str, Any],
         runtime: PolicyRuntime,
-    ) -> tuple[str, dict[str, int]]:
+    ) -> tuple[str, dict[str, int], list]:
         keys = list(candidates)
         labeled_answers = {_VOTE_LABELS[i]: candidates[key].text for i, key in enumerate(keys)}
         label_list = [_VOTE_LABELS[i] for i in range(len(keys))]
@@ -341,6 +393,8 @@ class P2PromptAdapter(BasePolicyAdapter):
             request=voter_request,
         )
 
+        voter_responses = list(results)
+
         tally: dict[str, int] = {}
         for result in results:
             label = parse_vote(result.text, label_list)
@@ -350,12 +404,12 @@ class P2PromptAdapter(BasePolicyAdapter):
             tally[key] = tally.get(key, 0) + 1
 
         if not tally:
-            return keys[0], {}
+            return keys[0], {}, voter_responses
 
         top_count = max(tally.values())
         leaders = [key for key, count in tally.items() if count == top_count]
         if len(leaders) == 1:
-            return leaders[0], tally
+            return leaders[0], tally, voter_responses
 
         tie_break_request = PromptRequest(
             system_prompt=TIEBREAK_SYSTEM_PROMPT,
@@ -373,10 +427,46 @@ class P2PromptAdapter(BasePolicyAdapter):
             role="general" if runtime.has_specialist_role("general") else self.voter_roles[0],
             request=tie_break_request,
         )
+        voter_responses.append(tie_break_result)
         winning_label = parse_vote(
             tie_break_result.text,
             [label for label in label_list if label_to_key[label] in leaders],
         )
         if winning_label is None:
-            return leaders[0], tally
-        return label_to_key[winning_label], tally
+            return leaders[0], tally, voter_responses
+        return label_to_key[winning_label], tally, voter_responses
+
+
+def _single_specialist_metrics(
+    *,
+    role: str,
+    response: Any,
+    confidence: float | None,
+) -> PolicyMetrics:
+    latency_by_role, usage_by_role = aggregate_specialist_metrics(
+        {role: [response]}
+    )
+    return PolicyMetrics(
+        latency_ms=sum(latency_by_role.values()),
+        token_usage=sum_usage(list(usage_by_role.values())),
+        confidence_score=confidence,
+        specialist_latency_ms=latency_by_role,
+        specialist_token_usage=usage_by_role,
+    )
+
+
+def _multi_specialist_metrics(
+    *,
+    responses_by_role: dict[str, list],
+    confidence: float | None,
+) -> PolicyMetrics:
+    latency_by_role, usage_by_role = aggregate_specialist_metrics(
+        responses_by_role
+    )
+    return PolicyMetrics(
+        latency_ms=sum(latency_by_role.values()),
+        token_usage=sum_usage(list(usage_by_role.values())),
+        confidence_score=confidence,
+        specialist_latency_ms=latency_by_role,
+        specialist_token_usage=usage_by_role,
+    )

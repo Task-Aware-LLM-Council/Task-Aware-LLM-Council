@@ -44,14 +44,17 @@ from council_policies.decomposer import Decomposer, PassthroughDecomposer
 from council_policies.policy_runner import (
     BasePolicyAdapter,
     PolicyExecutionState,
+    PolicyMetrics,
     PolicyResult,
     PolicyRuntime,
     SpecialistCache,
     SpecialistRequest,
+    aggregate_specialist_metrics,
     build_run_from_cached_response,
     build_specialist_cache_key,
     make_policy_result,
     orchestrator_to_prompt_response,
+    sum_usage,
 )
 from council_policies.router import DispatchRun, RoutingDecision, Router, Subtask
 from council_policies.synthesis import synthesize_ordered
@@ -194,6 +197,10 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 "router_fallback_used": [d.fallback_used for d in decisions],
                 "synthesizer_role": self.synthesizer_role,
                 "synthesis_used": len(run_payloads) > 1,
+                "predicted_route": (
+                    runs[0].role if len(runs) == 1 else [r.role for r in runs]
+                ),
+                "router_type": type(self.router).__name__,
             },
         )
 
@@ -204,9 +211,14 @@ class LearnedRouterPolicy(BasePolicyAdapter):
         runtime: PolicyRuntime,
     ) -> PolicyResult:
         run_payloads = list(state.metadata["runs"])
+        confidence = _mean_or_none(state.metadata.get("router_confidence") or [])
 
         if len(run_payloads) == 1:
             response = cache.get(run_payloads[0]["cache_key"])
+            metrics = _build_metrics(
+                specialist_responses={run_payloads[0]["role"]: [response]},
+                confidence=confidence,
+            )
             return make_policy_result(
                 state,
                 response=orchestrator_to_prompt_response(
@@ -220,11 +232,14 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                     "synthesis_short_circuit": "single_run",
                     "synthesis_used_fallback": False,
                 },
+                metrics=metrics,
             )
 
         runs: list[DispatchRun] = []
+        specialist_by_role: dict[str, list] = {}
         for run_payload in run_payloads:
             response = cache.get(run_payload["cache_key"])
+            specialist_by_role.setdefault(run_payload["role"], []).append(response)
             runs.append(
                 build_run_from_cached_response(
                     run_payload["role"],
@@ -241,6 +256,11 @@ class LearnedRouterPolicy(BasePolicyAdapter):
             synthesizer_role=self.synthesizer_role,
         )
         short_circuit = synthesis_result.metadata.get("short_circuit")
+        specialist_by_role[self.synthesizer_role] = [synthesis_result.response]
+        metrics = _build_metrics(
+            specialist_responses=specialist_by_role,
+            confidence=confidence,
+        )
         return make_policy_result(
             state,
             response=orchestrator_to_prompt_response(
@@ -254,6 +274,7 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 "synthesis_short_circuit": short_circuit,
                 "synthesis_used_fallback": synthesis_result.used_fallback,
             },
+            metrics=metrics,
         )
 
     def _resolve_role(self, router_role: str, runtime: PolicyRuntime) -> str:
@@ -266,3 +287,28 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 f"is also missing from the specialist config."
             )
         return self.fallback_role
+
+
+def _mean_or_none(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _build_metrics(
+    *,
+    specialist_responses: dict[str, list],
+    confidence: float | None,
+) -> PolicyMetrics:
+    latency_by_role, usage_by_role = aggregate_specialist_metrics(
+        specialist_responses
+    )
+    total_latency = sum(latency_by_role.values())
+    total_usage = sum_usage(list(usage_by_role.values()))
+    return PolicyMetrics(
+        latency_ms=total_latency,
+        token_usage=total_usage,
+        confidence_score=confidence,
+        specialist_latency_ms=latency_by_role,
+        specialist_token_usage=usage_by_role,
+    )

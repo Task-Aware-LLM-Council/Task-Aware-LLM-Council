@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Protocol, TYPE_CHECKING
 
-from llm_gateway import Message, PromptRequest, PromptResponse
+from llm_gateway import Message, PromptRequest, PromptResponse, Usage
 from model_orchestration import ModelOrchestrator, OrchestratorConfig, OrchestratorResponse
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from council_policies.router import DispatchRun
@@ -70,11 +73,41 @@ class PolicyExecutionState:
 
 
 @dataclass(slots=True, frozen=True)
+class PolicyMetrics:
+    """Standardized per-policy metrics surface.
+
+    `latency_ms` is *compute* latency — the sum of every
+    `OrchestratorResponse.latency_ms` the policy consumed (specialist +
+    synthesizer). It is what the policy pays for, not wall-clock; in the
+    CouncilBenchmarkRunner specialist calls are shared across policies, so
+    wall-clock attribution is ambiguous. `specialist_latency_ms` breaks the
+    same total down per role (synthesizer rolled in under its role key).
+    Token usage mirrors the split. `confidence_score` is policy-defined —
+    P4 mean router confidence, P3 1.0/0.0 on route/fallback, P2 normalized
+    vote margin, None when the policy has no natural signal. `error` holds
+    the exception class name when the runner catches a failure; otherwise
+    None.
+    """
+
+    latency_ms: float
+    token_usage: Usage
+    confidence_score: float | None = None
+    specialist_latency_ms: dict[str, float] = field(default_factory=dict)
+    specialist_token_usage: dict[str, Usage] = field(default_factory=dict)
+    error: str | None = None
+
+
+def _empty_metrics() -> PolicyMetrics:
+    return PolicyMetrics(latency_ms=0.0, token_usage=Usage())
+
+
+@dataclass(slots=True, frozen=True)
 class PolicyResult:
     policy_id: str
     request: PromptRequest
     response: PromptResponse
     metadata: dict[str, Any] = field(default_factory=dict)
+    metrics: PolicyMetrics = field(default_factory=_empty_metrics)
 
 
 class SpecialistCache:
@@ -263,6 +296,54 @@ class BasePolicyAdapter:
         return state
 
 
+@dataclass(slots=True)
+class _PolicySlot:
+    """Per-(policy, request) workspace for the runner.
+
+    Holds the evolving `PolicyExecutionState` (None once an error shorts
+    the pipeline) and the first exception encountered. Keeping the slot
+    separate from `PolicyExecutionState` lets the runner track failures
+    that happen *before* a state is constructed (plan() raised), which
+    the state dataclass can't express on its own."""
+
+    policy: CouncilPolicyAdapter
+    request: PromptRequest
+    state: PolicyExecutionState | None = None
+    error: Exception | None = None
+
+
+def _make_error_result(slot: _PolicySlot) -> PolicyResult:
+    """Build a sentinel PolicyResult for a policy whose pipeline failed.
+
+    The `response` is an empty PromptResponse — downstream consumers
+    should check `metrics.error` before treating the text as meaningful.
+    We preserve partial metadata from `slot.state` when available (e.g.
+    plan() completed but complete_specialist_phase() raised)."""
+    err = slot.error
+    error_name = type(err).__name__ if err is not None else "UnknownError"
+    policy_id = getattr(slot.policy, "policy_id", type(slot.policy).__name__)
+    metadata = dict(slot.state.metadata) if slot.state is not None else {}
+    metadata["policy_id"] = policy_id
+    metadata["error"] = error_name
+    metadata["error_message"] = str(err) if err is not None else ""
+    empty_response = PromptResponse(
+        model="",
+        text="",
+        metadata={"error": error_name},
+    )
+    return PolicyResult(
+        policy_id=policy_id,
+        request=slot.request,
+        response=empty_response,
+        metadata=metadata,
+        metrics=PolicyMetrics(
+            latency_ms=0.0,
+            token_usage=Usage(),
+            error=error_name,
+        ),
+    )
+
+
 class CouncilBenchmarkRunner:
     def __init__(
         self,
@@ -278,32 +359,61 @@ class CouncilBenchmarkRunner:
         requests: list[PromptRequest],
     ) -> PolicyBenchmarkResult:
         cache = SpecialistCache()
-        states: list[tuple[CouncilPolicyAdapter, PolicyExecutionState]] = []
+        slots: list[_PolicySlot] = []
 
         for request in requests:
             for policy in self.policies:
-                state = await policy.plan(request, self.runtime)
-                states.append((policy, state))
+                slot = _PolicySlot(policy=policy, request=request)
+                try:
+                    slot.state = await policy.plan(request, self.runtime)
+                except Exception as exc:
+                    slot.error = exc
+                    logger.exception(
+                        "plan() failed for policy %s",
+                        getattr(policy, "policy_id", type(policy).__name__),
+                    )
+                slots.append(slot)
 
         all_specialist_requests = [
             specialist_request
-            for _, state in states
-            for specialist_request in state.specialist_requests
+            for slot in slots
+            if slot.state is not None
+            for specialist_request in slot.state.specialist_requests
         ]
         await self.runtime.execute_specialist_requests(all_specialist_requests, cache)
 
-        updated_states: list[tuple[CouncilPolicyAdapter, PolicyExecutionState]] = []
-        for policy, state in states:
-            updated_state = await policy.complete_specialist_phase(
-                state, cache, self.runtime
-            )
-            updated_states.append((policy, updated_state))
+        for slot in slots:
+            if slot.state is None:
+                continue
+            try:
+                slot.state = await slot.policy.complete_specialist_phase(
+                    slot.state, cache, self.runtime
+                )
+            except Exception as exc:
+                slot.error = exc
+                logger.exception(
+                    "complete_specialist_phase() failed for policy %s",
+                    getattr(slot.policy, "policy_id", type(slot.policy).__name__),
+                )
+                slot.state = None
 
         await self.runtime.close_specialists()
 
         results: list[PolicyResult] = []
-        for policy, state in updated_states:
-            results.append(await policy.finalize(state, cache, self.runtime))
+        for slot in slots:
+            if slot.state is not None:
+                try:
+                    results.append(await slot.policy.finalize(
+                        slot.state, cache, self.runtime
+                    ))
+                    continue
+                except Exception as exc:
+                    slot.error = exc
+                    logger.exception(
+                        "finalize() failed for policy %s",
+                        getattr(slot.policy, "policy_id", type(slot.policy).__name__),
+                    )
+            results.append(_make_error_result(slot))
 
         await self.runtime.close_synthesizer()
         return PolicyBenchmarkResult(
@@ -347,6 +457,7 @@ def make_policy_result(
     *,
     response: PromptResponse,
     extra_metadata: dict[str, Any] | None = None,
+    metrics: PolicyMetrics | None = None,
 ) -> PolicyResult:
     metadata = state_metadata_with_response(state, extra_metadata=extra_metadata)
     return PolicyResult(
@@ -354,7 +465,54 @@ def make_policy_result(
         request=state.request,
         response=merge_prompt_response_metadata(response, metadata),
         metadata=metadata,
+        metrics=metrics if metrics is not None else _empty_metrics(),
     )
+
+
+def sum_usage(entries: list[Usage]) -> Usage:
+    """Sum a list of Usage records. None fields are treated as 0; the
+    result's field is None only if every input's field was None — so an
+    all-None-input aggregation keeps the ``not reported'' signal instead of
+    silently flattening to 0."""
+    if not entries:
+        return Usage()
+
+    def _sum(attr: str) -> int | None:
+        values = [getattr(u, attr) for u in entries]
+        if all(v is None for v in values):
+            return None
+        return sum(v or 0 for v in values)
+
+    def _sum_float(attr: str) -> float | None:
+        values = [getattr(u, attr) for u in entries]
+        if all(v is None for v in values):
+            return None
+        return sum(v or 0.0 for v in values)
+
+    currencies = {u.currency for u in entries if u.currency is not None}
+    return Usage(
+        input_tokens=_sum("input_tokens"),
+        output_tokens=_sum("output_tokens"),
+        total_tokens=_sum("total_tokens"),
+        cost=_sum_float("cost"),
+        currency=next(iter(currencies)) if len(currencies) == 1 else None,
+    )
+
+
+def aggregate_specialist_metrics(
+    responses: dict[str, list[OrchestratorResponse]],
+) -> tuple[dict[str, float], dict[str, Usage]]:
+    """Collapse per-role lists of OrchestratorResponse into
+    (latency-by-role, usage-by-role). Callers pass only what they want
+    attributed under a given role label — synthesizer responses usually go
+    under a dedicated key so dashboards can separate referee cost from
+    specialist cost."""
+    latency_by_role: dict[str, float] = {}
+    usage_by_role: dict[str, Usage] = {}
+    for role, resps in responses.items():
+        latency_by_role[role] = sum(r.latency_ms or 0.0 for r in resps)
+        usage_by_role[role] = sum_usage([r.prompt_response.usage for r in resps])
+    return latency_by_role, usage_by_role
 
 
 def build_run_from_cached_response(
