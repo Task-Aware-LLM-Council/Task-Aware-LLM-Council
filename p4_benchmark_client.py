@@ -119,10 +119,12 @@ async def main() -> int:
     args = parse_args()
 
     # Joint decomposer+router: in-process, loads first, stays resident through
-    # the full run. Gemma-2-2B is ~5GB bf16 on CUDA; tolerated next to the
-    # quantized specialist stack on an A40/A100.
-    print(f"Loading joint decomposer+router from {args.model_dir}")
-    generate_fn = HFCausalGenerate(args.model_dir)
+    # the full run. Pinned to CPU by default — Gemma-2-2B on GPU is ~5GB bf16,
+    # which doesn't fit next to three quantized specialists on a 44GB A40.
+    # CPU adds ~500-1500ms per decompose call, tolerated at smoke-bench scale.
+    # Flip to device="cuda" once specialists stop co-residing (or int8 Gemma).
+    print(f"Loading joint decomposer+router from {args.model_dir} (device=cpu)")
+    generate_fn = HFCausalGenerate(args.model_dir, device="cpu")
     decomposer = Seq2SeqDecomposerRouter(
         generate_fn=generate_fn,
         max_subtasks=args.max_subtasks,
