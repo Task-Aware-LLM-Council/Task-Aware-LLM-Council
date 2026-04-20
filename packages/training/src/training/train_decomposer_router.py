@@ -432,7 +432,8 @@ def main(argv: list[str] | None = None) -> int:
         logging_steps=20,
         report_to=[],
         seed=args.seed,
-        fp16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
     )
 
     trainer = Seq2SeqTrainer(
