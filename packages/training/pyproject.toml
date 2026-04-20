@@ -26,6 +26,14 @@ decomposer-router = [
     "datasets>=2.19",
     "huggingface-hub>=0.23",
 ]
+decomposer-router-causal = [
+    "torch>=2.2",
+    "transformers>=4.52.4",
+    "accelerate>=0.26",
+    "datasets>=2.19",
+    "numpy>=1.26",
+    "peft>=0.11",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]
