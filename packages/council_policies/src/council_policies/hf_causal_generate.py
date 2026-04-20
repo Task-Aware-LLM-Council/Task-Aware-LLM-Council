@@ -40,7 +40,7 @@ one specialist role.
 Specialist roles:
   math_code     - computation, algorithms, code generation or debugging
   qa_reasoning  - multi-hop reasoning, long-context QA, explanation
-  fact_general  - fact retrieval, fact verification, general knowledge
+  fact_general  - factual lookup, single-fact retrieval, general knowledge
 
 Rules:
 - If the prompt needs only one role, output a single line. Do not split \
@@ -49,6 +49,9 @@ single-skill prompts into reasoning sub-steps.
 subtask in execution order.
 - Each subtask must be self-contained: include enough context that a \
 specialist who has not seen the other subtasks can answer it.
+- Emit subtasks as plain natural-language questions or instructions. \
+Never use "Claim: X. Is this SUPPORTS, REFUTES, or NOT_ENOUGH_INFO?" \
+framing — rewrite such inputs as "Is it true that X?"
 - Output format, EXACTLY: one subtask per line as `<role>: <subtask>`. \
 No preamble, no JSON, no markdown, no blank lines, no trailing commentary.
 

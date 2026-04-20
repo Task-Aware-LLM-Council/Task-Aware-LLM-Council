@@ -146,8 +146,8 @@ Roles:
 - math_code     : numerical computation, algebra, proofs, code writing or debugging
 - qa_reasoning  : multi-hop questions, reading comprehension, long-document QA, \
 inference chains
-- fact_general  : single-claim verification, fact-checking, yes/no or \
-SUPPORTS/REFUTES/NOT_ENOUGH_INFO judgements
+- fact_general  : factual lookup, single-fact retrieval, fact-checking posed \
+as a plain question
 
 Rules:
 1. If the prompt needs only one role, return a list with exactly one element. \
@@ -159,7 +159,10 @@ per role, maximum {DEFAULT_MAX_SUBTASKS}.
 and entities the specialist needs. No pronouns or "it"/"this" references \
 that depend on another subtask. No "then"/"next" sequencing language.
 4. Preserve the order subtasks must be answered in.
-5. Return a JSON array only. No preamble, no markdown fences, no commentary.
+5. Emit subtasks as plain natural-language questions or instructions. Never \
+use "Claim: X. Is this SUPPORTS, REFUTES, or NOT_ENOUGH_INFO?" framing — \
+rewrite such inputs as "Is it true that X?" or "Verify whether X."
+6. Return a JSON array only. No preamble, no markdown fences, no commentary.
 
 Output format:
 [{{"role": "<role>", "subtask": "<self-contained prompt text>"}}, ...]
@@ -179,9 +182,9 @@ Prompt: "The 2004 Indian Ocean tsunami was caused by a megathrust earthquake. \
 Does scientific consensus support this claim?"
 Output:
 [
-  {{"role": "fact_general", "subtask": "Claim: The 2004 Indian Ocean tsunami was \
-caused by a megathrust earthquake. Is this claim SUPPORTS, REFUTES, or \
-NOT_ENOUGH_INFO according to scientific consensus?"}}
+  {{"role": "fact_general", "subtask": "Is it true that the 2004 Indian Ocean \
+tsunami was caused by a megathrust earthquake, according to scientific \
+consensus?"}}
 ]
 
 Prompt: "Based on the following article: [article text] — Who founded the \
@@ -191,9 +194,9 @@ Output:
 [
   {{"role": "qa_reasoning", "subtask": "Based on the following article: \
 [article text] — Who founded the organisation mentioned in paragraph 3?"}},
-  {{"role": "fact_general", "subtask": "Claim: the founder of the organisation \
-mentioned in paragraph 3 of the following article was born before 1900. \
-Article: [article text]. Is this SUPPORTS, REFUTES, or NOT_ENOUGH_INFO?"}}
+  {{"role": "fact_general", "subtask": "Was the founder of the organisation \
+mentioned in paragraph 3 of the following article born before 1900? \
+Article: [article text]."}}
 ]\
 """
 

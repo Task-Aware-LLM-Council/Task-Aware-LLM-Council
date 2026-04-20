@@ -14,9 +14,9 @@ random.seed(42)
 def main():
     all_records = []
     loaders = [
-        (load_musique, 800),
-        (load_quality, 600),
-        (load_fever, 1500),
+        (load_musique, 1200),
+        (load_quality, 1000),
+        (load_fever, 500),
         (load_hardmath, 800),
         (load_humaneval, 800),
     ]

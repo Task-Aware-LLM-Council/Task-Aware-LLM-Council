@@ -49,11 +49,17 @@ def load_fever(n: int = 40, seed: int = 42) -> list[dict]:
         else:
             evidence_text = str(evidence)
 
+        claim = ex.get("claim", "")
+        question = (
+            f"Is it true that {claim[0].lower() + claim[1:]}" if claim else ""
+        )
+        if question and not question.endswith("?"):
+            question = question.rstrip(".") + "?"
         rec = RouterExample(
             id=make_id("FEVER", ex.get("id", ex.get(
                 "original_id", random.randint(0, 999999)))),
             source_dataset="FEVER",
-            question=ex.get("claim", ""),
+            question=question,
             context=evidence_text,
             gold_answer=ex.get("label", ""),
             gold_label=ex.get("label", ""),
