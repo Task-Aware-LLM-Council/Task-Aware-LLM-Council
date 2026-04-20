@@ -73,7 +73,7 @@ def build_default_orchestrator_config(
             ModelSpec(
                 role="qa",
                 model=qa_model,
-                aliases=("qa",),
+                aliases=("qa", "qa_reasoning"),
                 description="Question-answering specialist.",
                 provider_config=_provider_config(
                     provider=provider,
@@ -86,7 +86,7 @@ def build_default_orchestrator_config(
             ModelSpec(
                 role="reasoning",
                 model=reasoning_model,
-                aliases=("reasoning", "math", "code"),
+                aliases=("reasoning", "math", "code", "math_code"),
                 description="Math and code specialist.",
                 provider_config=_provider_config(
                     provider=provider,
@@ -99,7 +99,7 @@ def build_default_orchestrator_config(
             ModelSpec(
                 role="general",
                 model=general_model,
-                aliases=("general", "fever"),
+                aliases=("general", "fever", "fact_general"),
                 description="Strong generalist and FEVER-oriented model.",
                 provider_config=_provider_config(
                     provider=provider,
@@ -151,9 +151,9 @@ def build_default_local_vllm_orchestrator_config(
         )
 
     specs = (
-        ("qa", qa_model, ("qa",), "Question-answering specialist.", 0),
-        ("reasoning", reasoning_model, ("reasoning", "math", "code"), "Math and code specialist.", 1),
-        ("general", general_model, ("general", "fever"), "Strong generalist and FEVER-oriented model.", 2),
+        ("qa", qa_model, ("qa", "qa_reasoning"), "Question-answering specialist.", 0),
+        ("reasoning", reasoning_model, ("reasoning", "math", "code", "math_code"), "Math and code specialist.", 1),
+        ("general", general_model, ("general", "fever", "fact_general"), "Strong generalist and FEVER-oriented model.", 2),
     )
 
     return OrchestratorConfig(

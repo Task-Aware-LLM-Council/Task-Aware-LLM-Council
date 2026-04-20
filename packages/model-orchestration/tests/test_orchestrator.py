@@ -114,8 +114,9 @@ def test_default_config_exposes_expected_roles_and_aliases() -> None:
     assert config.default_role == "general"
     assert tuple(spec.role for spec in config.models) == ("qa", "reasoning", "general")
     assert config.models[0].model == "google/gemma-2-9b-it"
-    assert config.models[1].aliases == ("reasoning", "math", "code")
-    assert config.models[2].aliases == ("general", "fever")
+    assert config.models[0].aliases == ("qa", "qa_reasoning")
+    assert config.models[1].aliases == ("reasoning", "math", "code", "math_code")
+    assert config.models[2].aliases == ("general", "fever", "fact_general")
     assert config.mode_label == "http"
 
 
