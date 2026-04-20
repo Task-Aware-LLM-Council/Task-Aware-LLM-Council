@@ -100,6 +100,7 @@ class HFCausalGenerate:
         self,
         model_id: str,
         *,
+        peft_adapter: str | None = None,
         system_prompt: str = DECOMPOSER_ROUTER_SYSTEM_PROMPT,
         device: str = "auto",
         torch_dtype: Any | None = None,
@@ -114,10 +115,16 @@ class HFCausalGenerate:
         if torch_dtype is None:
             torch_dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model_id)
+        # Load tokenizer from the adapter if provided — it was saved alongside
+        # and may carry added special tokens — else fall back to the base.
+        tokenizer_src = peft_adapter or model_id
+        self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_src)
         self._model = AutoModelForCausalLM.from_pretrained(
             model_id, torch_dtype=torch_dtype,
         )
+        if peft_adapter:
+            from peft import PeftModel
+            self._model = PeftModel.from_pretrained(self._model, peft_adapter)
         self._model.to(device)
         self._model.eval()
         self._device = device
