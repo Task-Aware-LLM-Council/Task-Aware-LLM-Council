@@ -210,6 +210,8 @@ class BuildArgs:
     source_revision: str
     teacher_model: str
     teacher_provider: str
+    teacher_api_base: str | None
+    teacher_api_key_env: str | None
     target_dataset: str
     push_to_hub: bool
     gold_eval_frac: float
@@ -232,6 +234,14 @@ def parse_args(argv: list[str] | None = None) -> BuildArgs:
                    help="HF dataset revision/SHA to pin. Empty = latest.")
     p.add_argument("--teacher-model", default=DEFAULT_TEACHER_MODEL)
     p.add_argument("--teacher-provider", default=DEFAULT_TEACHER_PROVIDER)
+    p.add_argument("--teacher-api-base", default=None,
+                   help="Override OpenAI-compatible base URL (e.g. NVIDIA NIM, "
+                        "DeepSeek, Together). Required when --teacher-provider "
+                        "is openai_compatible.")
+    p.add_argument("--teacher-api-key-env", default=None,
+                   help="Name of env var holding the teacher API key "
+                        "(e.g. NVIDIA_API_KEY). Required when --teacher-provider "
+                        "is openai_compatible.")
     p.add_argument("--target-dataset", default=DEFAULT_TARGET_DATASET)
     p.add_argument("--push-to-hub", action="store_true",
                    help="Push the built dataset to --target-dataset on HF Hub.")
@@ -253,6 +263,8 @@ def parse_args(argv: list[str] | None = None) -> BuildArgs:
         source_revision=ns.source_revision,
         teacher_model=ns.teacher_model,
         teacher_provider=ns.teacher_provider,
+        teacher_api_base=ns.teacher_api_base,
+        teacher_api_key_env=ns.teacher_api_key_env,
         target_dataset=ns.target_dataset,
         push_to_hub=ns.push_to_hub,
         gold_eval_frac=ns.gold_eval_frac,
@@ -854,9 +866,18 @@ def _build_teacher_client(args: BuildArgs) -> Any:
     """
     from llm_gateway.factory import create_client
     from llm_gateway.models import ProviderConfig, RetryPolicy
+    if args.teacher_provider == "openai_compatible" and not (
+        args.teacher_api_base and args.teacher_api_key_env
+    ):
+        raise ValueError(
+            "--teacher-provider openai_compatible requires "
+            "--teacher-api-base and --teacher-api-key-env."
+        )
     config = ProviderConfig(
         provider=args.teacher_provider,
         default_model=args.teacher_model,
+        api_base=args.teacher_api_base,
+        api_key_env=args.teacher_api_key_env,
     )
     return create_client(config, retry_policy=RetryPolicy(max_retries=5))
 
