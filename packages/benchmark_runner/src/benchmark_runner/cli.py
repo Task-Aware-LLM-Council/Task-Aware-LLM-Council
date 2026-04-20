@@ -193,7 +193,12 @@ async def _run_p2(spec, args):
             max_retries=1,
         )
 
-    spec = dc_replace(spec, models=(_P2_COUNCIL_MODEL,))
+    from llm_gateway import ProviderConfig
+    # Use a dummy non-LOCAL provider so the suite doesn't try to start a vLLM
+    # server for the virtual "p2_council" model. The P2 orchestrator manages
+    # its own vLLM servers internally.
+    dummy_provider_config = ProviderConfig(provider="openai-compatible")
+    spec = dc_replace(spec, models=(_P2_COUNCIL_MODEL,), provider_config=dummy_provider_config)
 
     async with ModelOrchestrator(orchestrator_config) as orch:
         client = P2PolicyClient(orch, model_name=_P2_COUNCIL_MODEL)
