@@ -866,11 +866,11 @@ def _build_teacher_client(args: BuildArgs) -> Any:
     """
     from llm_gateway.factory import create_client
     from llm_gateway.models import ProviderConfig, RetryPolicy
-    if args.teacher_provider == "openai_compatible" and not (
+    if args.teacher_provider == "openai-compatible" and not (
         args.teacher_api_base and args.teacher_api_key_env
     ):
         raise ValueError(
-            "--teacher-provider openai_compatible requires "
+            "--teacher-provider openai-compatible requires "
             "--teacher-api-base and --teacher-api-key-env."
         )
     config = ProviderConfig(
