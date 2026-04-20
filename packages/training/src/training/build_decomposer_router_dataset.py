@@ -922,8 +922,8 @@ async def _run_pipeline(args: BuildArgs) -> int:
         source_kwargs["revision"] = args.source_revision
     source = load_dataset(args.source, **source_kwargs)
 
-    dev_rows_raw = list(source["dev"])
-    mini_test_rows_raw = list(source["mini_test"])
+    dev_rows_raw = list(source["validation"])
+    mini_test_rows_raw = list(source["test"])
     if args.limit is not None:
         dev_rows_raw = dev_rows_raw[: args.limit]
         mini_test_rows_raw = mini_test_rows_raw[: max(1, args.limit // 4)]
