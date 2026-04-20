@@ -11,6 +11,8 @@ Run from repo root on a CARC compute node:
 
 Takes ~90s (model load) + ~5s/prompt on CPU, faster on GPU.
 """
+import asyncio
+
 from council_policies import HFCausalGenerate, Seq2SeqDecomposerRouter
 
 ADAPTER = "artifacts/decomposer_router_causal/adapter"
@@ -33,7 +35,7 @@ PROMPTS = [
 ]
 
 
-def main() -> None:
+async def main() -> None:
     print(f"Loading base + LoRA from {ADAPTER} ...")
     # Change device="cpu" to "cuda" if you have a GPU free.
     generate_fn = HFCausalGenerate(
@@ -45,11 +47,11 @@ def main() -> None:
     for i, prompt in enumerate(PROMPTS):
         print(f"--- prompt {i} ---")
         print(f"Q: {prompt}")
-        targets = decomposer.decompose(prompt, context="")
+        targets = await decomposer.decompose(prompt, context="")
         for t in targets:
             print(f"  -> {t.role}: {t.subtask}")
         print()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
