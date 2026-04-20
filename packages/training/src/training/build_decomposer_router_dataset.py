@@ -55,6 +55,7 @@ inside `main()` to keep this module grep-friendly.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import random
@@ -220,6 +221,7 @@ class BuildArgs:
     checkpoint_every: int
     limit: int | None
     seed: int
+    request_delay_seconds: float
 
 
 def parse_args(argv: list[str] | None = None) -> BuildArgs:
@@ -255,6 +257,10 @@ def parse_args(argv: list[str] | None = None) -> BuildArgs:
     p.add_argument("--limit", type=int, default=None,
                    help="Cap source prompts for dry runs; None = use all.")
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    p.add_argument("--request-delay-seconds", type=float, default=0.0,
+                   help="Sleep between teacher calls to avoid 429s. "
+                        "Stacks with gateway retry backoff; set ~0.5-1.5s "
+                        "for NVIDIA NIM on the shared free tier.")
     ns = p.parse_args(argv)
     return BuildArgs(
         out=ns.out,
@@ -273,6 +279,7 @@ def parse_args(argv: list[str] | None = None) -> BuildArgs:
         checkpoint_every=ns.checkpoint_every,
         limit=ns.limit,
         seed=ns.seed,
+        request_delay_seconds=ns.request_delay_seconds,
     )
 
 
@@ -504,6 +511,7 @@ async def call_teacher_batch(
     model: str,
     checkpoint_path: Path,
     checkpoint_every: int,
+    request_delay_seconds: float = 0.0,
 ) -> list[SyntheticRow]:
     """Drive teacher calls sequentially with a JSONL checkpoint so a
     network blip doesn't wipe the run. Returns rows in source order."""
@@ -555,6 +563,9 @@ async def call_teacher_batch(
         if len(pending) >= checkpoint_every:
             _flush_checkpoint(checkpoint_path, batch=pending)
             pending.clear()
+
+        if request_delay_seconds > 0 and index < len(rows) - 1:
+            await asyncio.sleep(request_delay_seconds)
 
     if pending:
         _flush_checkpoint(checkpoint_path, batch=pending)
@@ -942,6 +953,7 @@ async def _run_pipeline(args: BuildArgs) -> int:
         model=args.teacher_model,
         checkpoint_path=args.out / "_teacher_cache" / "dev.jsonl",
         checkpoint_every=args.checkpoint_every,
+        request_delay_seconds=args.request_delay_seconds,
     )
     synthetic_kept, drops = apply_filters(
         synthetic_raw,
@@ -963,6 +975,7 @@ async def _run_pipeline(args: BuildArgs) -> int:
         model=args.teacher_model,
         checkpoint_path=args.out / "_teacher_cache" / "mini_test.jsonl",
         checkpoint_every=args.checkpoint_every,
+        request_delay_seconds=args.request_delay_seconds,
     )
     mini_test_kept, mini_drops = apply_filters(
         mini_test_raw,
