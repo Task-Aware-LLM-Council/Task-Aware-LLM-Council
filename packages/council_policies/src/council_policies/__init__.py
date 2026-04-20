@@ -50,6 +50,10 @@ from council_policies.router_card import (
     RouterCard,
 )
 from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.hf_causal_generate import (
+    DECOMPOSER_ROUTER_SYSTEM_PROMPT,
+    HFCausalGenerate,
+)
 from council_policies.seq2seq_decomposer_router import (
     INPUT_PREFIX,
     GenerateFn,
@@ -81,7 +85,9 @@ __all__ = [
     "DEFAULT_CONTEXT_CHAR_CAP",
     "DEFAULT_FALLBACK_ROLE",
     "DecomposerRouterCard",
+    "DECOMPOSER_ROUTER_SYSTEM_PROMPT",
     "GenerateFn",
+    "HFCausalGenerate",
     "HFSeq2SeqGenerate",
     "INPUT_PREFIX",
     "Seq2SeqDecomposerRouter",

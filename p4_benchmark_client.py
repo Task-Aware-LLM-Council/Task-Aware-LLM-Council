@@ -2,8 +2,9 @@
 
 Runs the task-aware LLM council's P4 policy (`LearnedRouterPolicy`) end-to-end
 on CARC with:
-  - Joint decomposer+router (`artifacts/decomposer_router_model/`) in-process
-    via `HFSeq2SeqGenerate` — loads first, stays resident (~150MB).
+  - Joint decomposer+router in-process via `HFCausalGenerate` — loads first,
+    stays resident. Default is zero-shot `google/gemma-2-2b-it` (~5GB bf16);
+    swap `--model-dir` for a fine-tuned local artifact once trained.
   - Quantized 3-role specialist stack via `build_default_local_vllm_orchestrator_config()`
     — `task-aware-llm-council/{gemma-2-9b-it-GPTQ, DeepSeek-R1-Distill-Qwen-7B-AWQ-2,
     Qwen2.5-14B-Instruct-AWQ-2}`. Opened/closed by `PolicyRuntime`.
@@ -16,7 +17,6 @@ Lifecycle mirrors the peer's `test_orchestartor_client.py`:
 Usage
 -----
   uv run --package council-policies python p4_benchmark_client.py \\
-    --model-dir artifacts/decomposer_router_model \\
     --dataset task-aware-llm-council/router_dataset \\
     --split test \\
     --limit 25 \\
@@ -32,7 +32,7 @@ from pathlib import Path
 
 from common import get_current_user
 from council_policies import (
-    HFSeq2SeqGenerate,
+    HFCausalGenerate,
     LearnedRouterPolicy,
     Seq2SeqDecomposerRouter,
 )
@@ -85,9 +85,10 @@ def build_synthesizer_config() -> OrchestratorConfig:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--model-dir", required=True,
-                   help="Path/HF ID of trained joint decomposer+router "
-                        "(e.g. artifacts/decomposer_router_model).")
+    p.add_argument("--model-dir", default="google/gemma-2-2b-it",
+                   help="HF hub ID or local path of the joint decomposer+router "
+                        "model. Defaults to google/gemma-2-2b-it for zero-shot "
+                        "evaluation; swap for a fine-tuned artifact once trained.")
     p.add_argument("--dataset", default="task-aware-llm-council/router_dataset",
                    help="HF dataset name for evaluation prompts.")
     p.add_argument("--split", default="test")
@@ -118,9 +119,10 @@ async def main() -> int:
     args = parse_args()
 
     # Joint decomposer+router: in-process, loads first, stays resident through
-    # the full run. ~150MB on fp16 CUDA; tolerated next to the specialist stack.
+    # the full run. Gemma-2-2B is ~5GB bf16 on CUDA; tolerated next to the
+    # quantized specialist stack on an A40/A100.
     print(f"Loading joint decomposer+router from {args.model_dir}")
-    generate_fn = HFSeq2SeqGenerate(args.model_dir)
+    generate_fn = HFCausalGenerate(args.model_dir)
     decomposer = Seq2SeqDecomposerRouter(
         generate_fn=generate_fn,
         max_subtasks=args.max_subtasks,
