@@ -45,7 +45,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
-from council_policies.decomposer import _parse_subtask_array
 from council_policies.router import Subtask
 from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
 from council_policies.router_labels import DEFAULT_FALLBACK_ROLE
@@ -57,6 +56,57 @@ INPUT_PREFIX: str = "decompose_and_route: "
 time. Serving must use the exact same prefix — typo here silently
 wrecks accuracy. Also imported by `training.train_decomposer_router`
 so both sides share one string."""
+
+
+# --------------------------------------------------------------------------- #
+# Target format
+# --------------------------------------------------------------------------- #
+#
+# Flan-T5's SentencePiece vocabulary lacks `{` and `}` (they map to <unk>),
+# so a JSON target format silently loses structure through tokenization.
+# We use a newline-delimited `role: subtask` format that tokenizes cleanly
+# and is easy to parse deterministically.
+#
+# Format:
+#   math_code: Compute 2+2.
+#   qa_reasoning: Explain whether 4 is prime.
+#
+# The training script and the serving class share this serializer + parser
+# so train-time labels and serve-time parsed output match byte-for-byte.
+
+
+def serialize_targets(targets: list[dict[str, Any]]) -> str:
+    """Serialize role+subtask dicts to the T5-friendly training target.
+    Newlines inside subtask text are collapsed to spaces so the line-
+    separator contract holds."""
+    lines: list[str] = []
+    for entry in targets:
+        role = str(entry.get("role", "")).strip()
+        subtask = str(entry.get("subtask", "")).replace("\n", " ").strip()
+        if not role or not subtask:
+            continue
+        lines.append(f"{role}: {subtask}")
+    return "\n".join(lines)
+
+
+def parse_targets(text: str) -> list[dict[str, str]]:
+    """Parse model output back into role+subtask dicts. Tolerant of
+    blank lines, missing colons, and trailing whitespace; silently
+    drops malformed lines."""
+    result: list[dict[str, str]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        role, sep, subtask = line.partition(":")
+        if not sep:
+            continue
+        role = role.strip()
+        subtask = subtask.strip()
+        if not role or not subtask:
+            continue
+        result.append({"role": role, "subtask": subtask})
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -146,11 +196,25 @@ class Seq2SeqDecomposerRouter:
             )
             return [Subtask(text=prompt, order=0)]
 
-        return _parse_subtask_array(
-            raw,
-            fallback_prompt=prompt,
-            max_subtasks=self.max_subtasks,
-        )
+        parsed = parse_targets(raw)
+        if not parsed:
+            logger.warning(
+                "Seq2SeqDecomposerRouter: no parseable lines; "
+                "falling back to passthrough. raw=%r", raw[:200],
+            )
+            return [Subtask(text=prompt, order=0)]
+
+        subtasks: list[Subtask] = []
+        for item in parsed[: self.max_subtasks]:
+            role = item["role"]
+            subtasks.append(
+                Subtask(
+                    text=item["subtask"],
+                    order=len(subtasks),
+                    suggested_role=role or None,
+                )
+            )
+        return subtasks
 
 
 # --------------------------------------------------------------------------- #

@@ -13,10 +13,11 @@ Pipeline:
            "decompose_and_route: " + featurize(question, context)
        reusing `council_policies.router_featurize.featurize` so train-
        and serve-time inputs are byte-identical.
-    3. Targets are compact JSON arrays:
-           json.dumps(row["targets"], separators=(",",":"))
-       matching the `_JSON_ARRAY_RE` that both the build pipeline and
-       the serving class rely on.
+    3. Targets are newline-delimited `role: subtask` lines (Flan-T5's
+       SentencePiece vocab maps `{` and `}` to `<unk>`, so JSON targets
+       silently lose their braces during tokenization). Serialization
+       and parsing go through `seq2seq_decomposer_router.serialize_targets`
+       / `parse_targets` so train- and serve-time share one format.
     4. Fine-tune `google/flan-t5-small` with `Seq2SeqTrainer`. Early
        stop on `composite` (role-accuracy + JSON parseability + ROUGE-L).
     5. Eval on dev, mini_test, gold_eval. Write artifact + sibling
@@ -49,7 +50,6 @@ import argparse
 import json
 import logging
 import random
-import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -62,11 +62,6 @@ DEFAULT_DATASET = "task-aware-llm-council/decomposer-router-dataset"
 DEFAULT_BASE_MODEL = "google/flan-t5-small"
 DEFAULT_SEED = 42
 INPUT_FORMAT_VERSION = "featurize_v1"
-
-# Same JSON-array regex used in decomposer.py / build script — keep the
-# three parsers in lockstep.
-_JSON_ARRAY_RE = re.compile(r"\[.*\]", re.DOTALL)
-
 
 @dataclass(slots=True)
 class TrainArgs:
@@ -175,9 +170,9 @@ def _featurize_row(
 
 
 def _target_text(row: dict[str, Any]) -> str:
-    """Compact JSON array (no spaces) matching `_JSON_ARRAY_RE`."""
-    targets = row.get("targets") or []
-    return json.dumps(targets, separators=(",", ":"), ensure_ascii=False)
+    """T5-friendly `role: subtask` lines (shared with serving class)."""
+    from council_policies.seq2seq_decomposer_router import serialize_targets
+    return serialize_targets(row.get("targets") or [])
 
 
 # --------------------------------------------------------------------------- #
@@ -186,28 +181,15 @@ def _target_text(row: dict[str, Any]) -> str:
 
 
 def _parse_generated(text: str) -> list[dict[str, str]] | None:
-    """Parse a generated JSON array. None on any failure."""
+    """Parse T5 output via the shared `parse_targets` helper. Returns
+    None when nothing parseable, so compute_metrics can count it as
+    unparseable."""
+    from council_policies.seq2seq_decomposer_router import parse_targets
+
     if not text:
         return None
-    match = _JSON_ARRAY_RE.search(text)
-    if not match:
-        return None
-    try:
-        parsed = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, list):
-        return None
-    cleaned: list[dict[str, str]] = []
-    for item in parsed:
-        if not isinstance(item, dict):
-            continue
-        role = item.get("role")
-        subtask = item.get("subtask")
-        if not isinstance(role, str) or not isinstance(subtask, str):
-            continue
-        cleaned.append({"role": role.strip(), "subtask": subtask.strip()})
-    return cleaned or None
+    parsed = parse_targets(text)
+    return parsed or None
 
 
 def _rougeL(pred: str, target: str) -> float:
