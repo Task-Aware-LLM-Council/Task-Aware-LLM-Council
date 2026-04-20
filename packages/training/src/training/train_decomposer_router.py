@@ -346,7 +346,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.dataset_revision:
         load_kwargs["revision"] = args.dataset_revision
     logger.info("Loading dataset %s", args.dataset)
-    raw = load_dataset(args.dataset, **load_kwargs)
+    parquet_dir = Path(args.dataset) / "parquet"
+    if parquet_dir.is_dir():
+        data_files = {
+            name: str(parquet_dir / f"{name}.parquet")
+            for name in ("train", "dev", "mini_test", "gold_eval")
+        }
+        raw = load_dataset("parquet", data_files=data_files)
+    else:
+        raw = load_dataset(args.dataset, **load_kwargs)
     for required in ("train", "dev", "mini_test", "gold_eval"):
         if required not in raw:
             raise KeyError(
