@@ -1,10 +1,17 @@
 """
-P3 Policy evaluation CLI — local vLLM variant.
+P3 Policy evaluation CLI — uses dataset profiles for proper constrained_question
+formatting, passes system_prompt ditto, and writes metric-ready JSONL output.
 
-Uses the same logic as cli.py but targets locally-served quantized models:
-  - QA        : task-aware-llm-council/gemma-2-9b-it-GPTQ          (GPTQ 8-bit)
-  - Reasoning : task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2  (AWQ 8-bit)
-  - General   : task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2  (AWQ 4-bit)
+Each output record has:
+  - example_id, dataset_name
+  - question          : the constrained_question from the profile (as sent to model)
+  - response_text     : model's raw response (key used by all profile scorers)
+  - reference         : ground-truth dict as built by the profile
+  - task_type         : P3 routing classification
+  - routed_role       : which specialist handled it
+  - failed / error    : routing/dispatch status
+  - latency_ms
+  - answerable        : (musique-only) whether question is answerable
 """
 
 from __future__ import annotations
@@ -14,47 +21,33 @@ import json
 import logging
 from pathlib import Path
 
-from llm_gateway import LOCAL_LAUNCH_QUANTIZATION
-from model_orchestration import build_default_local_vllm_orchestrator_config
-from model_orchestration.models import LocalVLLMPresetConfig
+from llm_gateway import Provider
+from model_orchestration import ModelOrchestrator, build_default_orchestrator_config
 
 from council_policies.p3_policy import RuleBasedRoutingPolicy, load_all_profiles
-from model_orchestration import ModelOrchestrator
-
-from common import get_current_user
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# ── Local vLLM specialist config ───────────────────────────────────────────────
-_QA_MODEL        = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
-_REASONING_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
-_GENERAL_MODEL   = "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
-
-local_specialist_config = build_default_local_vllm_orchestrator_config(
-    qa_model=_QA_MODEL,
-    reasoning_model=_REASONING_MODEL,
-    general_model=_GENERAL_MODEL,
-    preset=LocalVLLMPresetConfig(
-        bind=f"/scratch1/{get_current_user()}/.cache",
-        # Default quantization for AWQ models (reasoning + general)
-        quantization="awq",
-        # QA model is GPTQ — override just that role
-        role_overrides={
-            "qa": {LOCAL_LAUNCH_QUANTIZATION: "gptq"},
-        },
-    ),
+# ── Specialist config (mirrors existing cli.py) ────────────────────────────────
+api_specialist_config = build_default_orchestrator_config(
+    provider=Provider.OPENAI_COMPATIBLE,
+    api_base="https://integrate.api.nvidia.com/v1/chat/completions",
+    qa_model="google/gemma-3-27b-it",
+    reasoning_model="openai/gpt-oss-120b",
+    general_model="qwen/qwen2.5-coder-32b-instruct",
+    api_key_env="NVIDIA_API_KEY",
 )
 
-N_PER_DATASET = 5
-OUTPUT_FILE = "results_p3_eval_local.jsonl"
+N_PER_DATASET = 5       # samples per profile
+OUTPUT_FILE = "results_p3_eval.jsonl"
 
 
 async def async_main() -> None:
     print("Loading dataset profiles...")
     profiles = load_all_profiles()
 
-    async with ModelOrchestrator(local_specialist_config) as orchestrator:
+    async with ModelOrchestrator(api_specialist_config) as orchestrator:
         policy = RuleBasedRoutingPolicy(
             orchestrator,
             n_per_dataset=N_PER_DATASET,
@@ -78,16 +71,23 @@ async def async_main() -> None:
         case = qr.case
         example = case.example
 
-        answerable = case.metadata.get("answerable")
+        # Pull per-case metadata that's useful for scoring (avoids dumping raw_row)
+        answerable = case.metadata.get("answerable")  # musique only
 
         record: dict = {
             "example_id": example.example_id,
             "dataset_name": example.dataset_name,
+            # constrained_question — exactly what the profile built and sent to the model
             "question": example.question,
+            # system_prompt passed ditto from the profile (None unless a profile sets it)
             "system_prompt": example.system_prompt,
+            # context passed ditto from the profile
             "context": example.context,
+            # KEY field used by all profile scorers via _prediction_text()
             "response_text": qr.response.text if qr.response is not None else None,
+            # ground-truth reference as built by the profile
             "reference": case.reference,
+            # routing metadata
             "task_type": qr.task_type.value,
             "routed_role": qr.routed_role,
             "failed": qr.failed,
@@ -95,6 +95,7 @@ async def async_main() -> None:
             "latency_ms": qr.latency_ms,
         }
 
+        # Include answerable flag when present (needed by MusiqueProfile.score)
         if answerable is not None:
             record["answerable"] = answerable
 
@@ -107,6 +108,7 @@ async def async_main() -> None:
 
     print(f"\nSaved {len(output_records)} records to {output_path.resolve()}")
 
+    # ── Routing summary ────────────────────────────────────────────────────────
     print("\n=== Routing Summary ===")
     for summary in result.routing_summaries:
         print(f"\nDataset : {summary.dataset_name}")
@@ -122,7 +124,7 @@ async def async_main() -> None:
 
 
 def main() -> None:
-    print("Starting P3 policy evaluation CLI (local vLLM)...")
+    print("Starting P3 policy evaluation CLI...")
     asyncio.run(async_main())
 
 

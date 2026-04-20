@@ -89,7 +89,7 @@ class MusiqueProfile(BaseDatasetProfile):
     metric_names: tuple[str, ...] = ("exact_match", "token_f1")
     primary_metric: str = "token_f1"
     dataset_name: str = "bdsaglam/musique"
-    NOT_PRESENT_IN_CONTEXT = "NOT PRESENT IN CONTEXT" 
+    NOT_PRESENT_IN_CONTEXT = "NOT_FOUND" 
 
     def row_to_case(self, row: dict[str, Any], index: int) -> EvaluationCase:
         question = str(_first_present(row, "question",
@@ -371,4 +371,5 @@ class HumanEvalPlusProfile(BaseDatasetProfile):
                 )
             },
             metadata={"extracted_answer": extracted},
-        )
+        ) 
+    

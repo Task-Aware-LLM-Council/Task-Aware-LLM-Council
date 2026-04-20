@@ -1,0 +1,127 @@
+apptainer run \
+  --nv \
+  --bind /scratch1/bmahajan/.cache:/scratch1/bmahajan/.cache \
+  --env HF_HOME=/scratch1/bmahajan/.cache/huggingface \
+  vllm-openai_latest.sif \	
+  --model "sshleifer/tiny-gpt2" \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --dtype float
+
+
+apptainer run --nv --cleanenv \
+   --bind /scratch1/bmahajan/.cache:/scratch1/bmahajan/.cache \
+   --env HF_HOME=/scratch1/bmahajan/.cache/huggingface \
+   vllm-openai_latest.sif \
+   --model sshleifer/tiny-gpt2 \
+   --host 0.0.0.0 \
+   --port 8000 \
+--enforce-eager
+
+
+
+apptainer run --nv \
+   --bind /scratch1/bmahajan/.cache:/scratch1/bmahajan/.cache \
+   --env HF_HOME=/scratch1/bmahajan/.cache/huggingface \
+   --env CC=/usr/bin/gcc \
+   --env CXX=/usr/bin/g++ \
+   vllm-openai_latest.sif \
+   --model sshleifer/tiny-gpt2 \
+   --host 0.0.0.0 \
+   --port 8000 \
+--enforce-eager
+
+
+srun --pty -p gpu --gres=gpu:1 --account=robinjia_1822 \
+  --time=8:00:00 --cpus-per-task=8 --mem=64G bash
+
+
+
+srun --pty -p gpu --gres=gpu:2 --account=robinjia_1822 \
+  --time=3:00:00 --cpus-per-task=4 --mem=32G bash
+
+
+srun --pty -p gpu --gres=gpu:a40:1 --account=robinjia_1822 \
+  --time=02:00:00 --cpus-per-task=4 --mem=32G bash
+
+
+
+srun --pty -p gpu --gres=gpu:v100:1 --account=robinjia_1822 \
+  --time=06:00:00 --cpus-per-task=8 --mem=64G bash
+
+srun --pty -p gpu --gres=gpu:a40:1 --account=robinjia_1822 \
+  --time=06:00:00 --cpus-per-task=8 --mem=64G bash
+
+
+
+srun --pty -p gpu --gres=gpu:l40s:1 --account=robinjia_1822 \
+  --time=06:00:00 --cpus-per-task=8 --mem=64G bash
+
+
+srun --pty -p gpu --gres=gpu:a100:1 --account=robinjia_1822 \
+  --time=03:00:00 --cpus-per-task=4 --mem=32G bash
+
+srun --pty -p gpu --gres=gpu:a100:1 --account=robinjia_1822 \
+  --time=06:00:00 --cpus-per-task=8 --mem=64G bash
+
+
+
+
+srun --pty -p gpu --gres=gpu:a100:2 --account=robinjia_1822 \
+  --time=04:00:00 --cpus-per-task=6 --mem=32G bash
+
+
+
+
+srun --overlap --jobid=7725079 --pty bash
+
+scontrol show job 7725079
+# For a running job
+scontrol show job 7904178| grep -E "JobId|StartTime|TimeLimit|RunTime"
+
+sinfo -o "%P %G %D %C"
+
+sinfo -N -o "%N %G %t %C" | grep gpu
+
+# Show only your running jobs
+squeue -u $USER -t R
+
+# Show only pending jobs
+squeue -u $USER -t PD
+
+
+
+# Show all
+squeue -p debug -o "%.18i %.9P %.8j %.8u %.2t %.10M %.6D %R"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+give me commands cheat sheet similar to these 
+
+srun --overlap --jobid=7725079 --pty bash
+
+
+scontrol show job 7725079
+
+for 
+
+checking my current scheduled jobs.
+How 
+
+
+
+
+
