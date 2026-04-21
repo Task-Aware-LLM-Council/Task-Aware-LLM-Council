@@ -249,10 +249,11 @@ def parse_args() -> argparse.Namespace:
                    help="Cap rows for smoke runs. None-equivalent via --limit -1.")
     p.add_argument("--out", type=Path, default=Path("p4_results.jsonl"))
     p.add_argument("--max-subtasks", type=int, default=4)
-    p.add_argument("--chunk-size", type=int, default=20,
-                   help="Flush results to disk after every N prompts. Specialists "
-                        "stay resident across chunks (one cold start total). "
-                        "Smaller = less work lost on crash, more per-chunk overhead.")
+    p.add_argument("--chunk-size", type=int, default=60,
+                   help="Flush results to disk after every N prompts. Each chunk "
+                        "pays one spec+synth cold start (~8min) because the 44GB "
+                        "A40 can't hold both simultaneously. Bigger chunk = fewer "
+                        "cold starts, bigger blast radius on crash.")
     return p.parse_args()
 
 
@@ -351,52 +352,40 @@ async def main() -> int:
         specialist_config=specialist_config,
         synthesizer_config=synthesizer_config,
     ) as runtime:
-        # Keep specialists/synth alive across chunks — the built-in runner
-        # closes them inside each runner.run(), which would cost a full cold
-        # start per chunk. PolicyRuntime.__aexit__ will do the real close.
-        real_close_specialists = runtime.close_specialists
-        real_close_synthesizer = runtime.close_synthesizer
+        runner = CouncilBenchmarkRunner(policies=(policy,), runtime=runtime)
+        # 3 specs (~27GB) + synth (~22GB) can't co-reside on a 44GB A40, so
+        # the runner tears specs down before launching synth each chunk.
+        # Larger --chunk-size amortizes ~8min cold-start overhead over more
+        # prompts.
+        print(
+            f"Running P4 policy over {len(rows)} prompts "
+            f"in chunks of {chunk_size}"
+        )
 
-        async def _noop() -> None:
-            return None
+        for chunk_start in range(0, len(rows), chunk_size):
+            chunk_end = min(chunk_start + chunk_size, len(rows))
+            chunk_rows = rows[chunk_start:chunk_end]
+            chunk_reqs = requests[chunk_start:chunk_end]
+            print(f"  chunk {chunk_start}-{chunk_end} ({len(chunk_rows)} prompts)")
 
-        runtime.close_specialists = _noop  # type: ignore[method-assign]
-        runtime.close_synthesizer = _noop  # type: ignore[method-assign]
+            benchmark_result = await runner.run(chunk_reqs)
 
-        try:
-            runner = CouncilBenchmarkRunner(policies=(policy,), runtime=runtime)
-            print(
-                f"Running P4 policy over {len(rows)} prompts "
-                f"in chunks of {chunk_size} — specialists stay resident"
-            )
-
-            for chunk_start in range(0, len(rows), chunk_size):
-                chunk_end = min(chunk_start + chunk_size, len(rows))
-                chunk_rows = rows[chunk_start:chunk_end]
-                chunk_reqs = requests[chunk_start:chunk_end]
-                print(f"  chunk {chunk_start}-{chunk_end} ({len(chunk_rows)} prompts)")
-
-                benchmark_result = await runner.run(chunk_reqs)
-
-                mode = "a" if args.out.exists() else "w"
-                with args.out.open(mode, encoding="utf-8") as f:
-                    for row, result in zip(
-                        chunk_rows, benchmark_result.results, strict=True,
-                    ):
-                        record = {k: v for k, v in row.items() if k != "prompt_template"}
-                        f.write(json.dumps({
-                            **record,
-                            "p4_answer": result.response.text,
-                            "predicted_route": result.metadata.get("predicted_route"),
-                            "synthesis_used": result.metadata.get("synthesis_used"),
-                            "error": result.metrics.error,
-                            "latency_ms": result.metrics.latency_ms,
-                        }) + "\n")
-                total_written += len(chunk_rows)
-                print(f"  flushed — {total_written}/{len(rows)} total")
-        finally:
-            runtime.close_specialists = real_close_specialists  # type: ignore[method-assign]
-            runtime.close_synthesizer = real_close_synthesizer  # type: ignore[method-assign]
+            mode = "a" if args.out.exists() else "w"
+            with args.out.open(mode, encoding="utf-8") as f:
+                for row, result in zip(
+                    chunk_rows, benchmark_result.results, strict=True,
+                ):
+                    record = {k: v for k, v in row.items() if k != "prompt_template"}
+                    f.write(json.dumps({
+                        **record,
+                        "p4_answer": result.response.text,
+                        "predicted_route": result.metadata.get("predicted_route"),
+                        "synthesis_used": result.metadata.get("synthesis_used"),
+                        "error": result.metrics.error,
+                        "latency_ms": result.metrics.latency_ms,
+                    }) + "\n")
+            total_written += len(chunk_rows)
+            print(f"  flushed — {total_written}/{len(rows)} total")
 
     print(f"Wrote {total_written} results to {args.out}")
     return 0
