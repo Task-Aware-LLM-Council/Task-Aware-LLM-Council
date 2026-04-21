@@ -6,6 +6,7 @@ Usage:
 """
 import argparse
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,6 +16,25 @@ from task_eval.extraction import (
     extract_qa_answer,
     extract_qa_answer_musique,
 )
+
+
+_SENTINEL_RE = re.compile(
+    r"(?:the answer is|answer:|final answer:)", re.IGNORECASE
+)
+_LAST_BOLD_RE = re.compile(r"\*\*([^*\n]+?)\*\*")
+
+
+def extract_qa_answer_musique_relaxed(response: str) -> str:
+    """Fallback: if no sentinel present, return the last bold span."""
+    response = (response or "").strip()
+    if not response:
+        return ""
+    if _SENTINEL_RE.search(response):
+        return extract_qa_answer_musique(response)
+    bolds = _LAST_BOLD_RE.findall(response)
+    if bolds:
+        return bolds[-1].strip()
+    return extract_qa_answer_musique(response)
 from task_eval.scoring import (
     exact_match_multi,
     label_accuracy,
@@ -24,7 +44,7 @@ from task_eval.scoring import (
 
 
 EXTRACTORS = {
-    "MuSiQue": extract_qa_answer_musique,
+    "MuSiQue": extract_qa_answer_musique_relaxed,
     "HotpotQA": extract_qa_answer,
     "2WikiMultiHopQA": extract_qa_answer,
     "QuALITY": extract_qa_answer,
