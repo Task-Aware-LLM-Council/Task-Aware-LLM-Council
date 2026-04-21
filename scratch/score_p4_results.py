@@ -77,7 +77,8 @@ def main():
             if source == "FEVER":
                 per_source[source]["acc"].append(label_accuracy(pred, gold[0]))
             elif source == "HARDMATH":
-                per_source[source]["acc"].append(math_exact_match(pred, gold[0]))
+                gold_extracted = extract_math_answer(gold[0])
+                per_source[source]["acc"].append(math_exact_match(pred, gold_extracted))
             else:
                 per_source[source]["em"].append(exact_match_multi(pred, gold))
                 per_source[source]["f1"].append(token_f1_multi(pred, gold))
