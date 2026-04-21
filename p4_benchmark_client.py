@@ -53,6 +53,49 @@ SYNTHESIZER_ROLE = "synthesizer"
 SYNTHESIZER_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
 
 
+# Mirrors MusiqueProfile in packages/task_eval (commit 3370c0c) — oracle
+# context + strict CoT prompt. router_dataset flattened is_supporting away, so
+# we rebuild the oracle context from the source dataset at startup.
+_MUSIQUE_CONSTRAINED_PROMPT = (
+    "You are a strict reading comprehension assistant. You must analyze the "
+    "context and think step-by-step out loud before answering.\n\n"
+    "RULES:\n"
+    "1. You must ONLY use the information provided in the Context. Do NOT use "
+    "general knowledge.\n"
+    "2. The answer is ALWAYS hidden somewhere in the text. You must search "
+    "carefully.\n\n"
+    "Context:\n{context}\n\n"
+    "Question: {question}\n\n"
+    "Write your step-by-step reasoning inside <scratchpad> tags. "
+    "After you are done thinking, conclude your response on a new line with "
+    "the exact format: 'Final Answer: <exact entity name>'. "
+    "If the answer is completely missing, output "
+    "'Final Answer: NOT PRESENT IN CONTEXT'."
+)
+
+
+def _build_musique_oracle_map() -> dict[str, str]:
+    src = load_dataset("bdsaglam/musique", split="validation")
+    mapping: dict[str, str] = {}
+    for row in src:
+        paragraphs = row.get("paragraphs") or []
+        supporting = [
+            p.get("paragraph_text", p.get("text", ""))
+            for p in paragraphs
+            if isinstance(p, dict) and p.get("is_supporting") is True
+        ]
+        if not supporting:
+            supporting = [
+                p.get("paragraph_text", p.get("text", ""))
+                for p in paragraphs[:4]
+                if isinstance(p, dict)
+            ]
+        mapping[str(row.get("id", ""))] = "\n\n".join(
+            p.strip() for p in supporting if p and p.strip()
+        )
+    return mapping
+
+
 def build_synthesizer_config() -> OrchestratorConfig:
     """Port-8004 DeepSeek-AWQ synthesizer. Lifted from the reference script
     on `main` (test_orchestartor_client.py) — keep ports/params aligned so
@@ -105,14 +148,33 @@ def parse_args() -> argparse.Namespace:
 
 def build_requests(dataset_name: str, split: str, limit: int) -> list[dict]:
     ds = load_dataset(dataset_name, split=split)
+    musique_oracle: dict[str, str] | None = None
+
     rows: list[dict] = []
     for index, row in enumerate(ds):
         if limit >= 0 and index >= limit:
             break
+        source = row.get("source_dataset", "")
+        question = row["question"]
+        context = row.get("context", "") or ""
+
+        if source == "MuSiQue":
+            if musique_oracle is None:
+                print("Loading Musique oracle context map (one-time ~30s)...")
+                musique_oracle = _build_musique_oracle_map()
+            oracle_ctx = musique_oracle.get(
+                str(row.get("original_id", "")), context,
+            )
+            question = _MUSIQUE_CONSTRAINED_PROMPT.format(
+                context=oracle_ctx, question=question,
+            )
+            context = ""
+
         rows.append({
             "index": index,
-            "question": row["question"],
-            "context": row.get("context", "") or "",
+            "source_dataset": source,
+            "question": question,
+            "context": context,
             "gold_answer": row.get("gold_answer"),
             "gold_label": row.get("gold_label"),
         })
