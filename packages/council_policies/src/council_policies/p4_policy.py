@@ -178,10 +178,22 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 f"({len(runs)} runs)."
             )
 
+        specialist_prompt_template = (request.metadata or {}).get(
+            "specialist_prompt_template"
+        )
         specialist_requests: list[SpecialistRequest] = []
         run_payloads: list[dict[str, Any]] = []
         for index, run in enumerate(runs):
-            sub_request = replace(request, user_prompt=run.rendered_prompt())
+            subtask_prompt = run.rendered_prompt()
+            if specialist_prompt_template:
+                wrapped = specialist_prompt_template.format(
+                    context=context_text, question=subtask_prompt,
+                )
+                sub_request = replace(
+                    request, user_prompt=wrapped, context=None,
+                )
+            else:
+                sub_request = replace(request, user_prompt=subtask_prompt)
             cache_key = build_specialist_cache_key(
                 self.policy_id,
                 request,

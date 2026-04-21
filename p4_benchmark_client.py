@@ -272,17 +272,14 @@ def build_requests(
         question = row["question"]
         context = row.get("context", "") or ""
 
+        prompt_template: str | None = None
         if source == "MuSiQue":
             if musique_oracle is None:
                 musique_oracle = _build_musique_oracle_map()
-            # Oracle-only context gives the 4x lift. The CoT wrapper from
-            # MusiqueProfile is omitted: wrapping bloats the decomposer
-            # input to 3-4K tokens and collapses CPU decomposer throughput
-            # to ~1 row / 3 min. Oracle filter keeps the main accuracy win;
-            # specialists get short, distractor-free context.
             context = musique_oracle.get(
                 str(row.get("original_id", "")), context,
             )
+            prompt_template = _MUSIQUE_CONSTRAINED_PROMPT
 
         rows.append({
             "index": index,
@@ -291,6 +288,7 @@ def build_requests(
             "context": context,
             "gold_answer": row.get("gold_answer"),
             "gold_label": row.get("gold_label"),
+            "prompt_template": prompt_template,
         })
     return rows
 
@@ -337,6 +335,11 @@ async def main() -> int:
         PromptRequest(
             user_prompt=row["question"],
             context=row["context"],
+            metadata=(
+                {"specialist_prompt_template": row["prompt_template"]}
+                if row["prompt_template"]
+                else {}
+            ),
         )
         for row in rows
     ]
@@ -380,8 +383,9 @@ async def main() -> int:
                     for row, result in zip(
                         chunk_rows, benchmark_result.results, strict=True,
                     ):
+                        record = {k: v for k, v in row.items() if k != "prompt_template"}
                         f.write(json.dumps({
-                            **row,
+                            **record,
                             "p4_answer": result.response.text,
                             "predicted_route": result.metadata.get("predicted_route"),
                             "synthesis_used": result.metadata.get("synthesis_used"),

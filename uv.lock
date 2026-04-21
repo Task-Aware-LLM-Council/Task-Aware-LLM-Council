@@ -1302,6 +1302,27 @@ wheels = [
 ]
 
 [[package]]
+name = "peft"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "accelerate" },
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "psutil" },
+    { name = "pyyaml" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "tqdm" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/cf/037f1e3d5186496c05513a6754639e2dab3038a05f384284d49a9bd06a2d/peft-0.19.1.tar.gz", hash = "sha256:0d97542fe96dcdaa20d3b81c06f26f988618f416a73544ab23c3618ccb674a40", size = 763738, upload-time = "2026-04-16T15:46:45.105Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/b6/f54d676ed93cc2dd2234c3b172ea9c8c3d7d29361e66b1b23dec57a67465/peft-0.19.1-py3-none-any.whl", hash = "sha256:2113f72a81621b5913ef28f9022204c742df111890c5f49d812716a4a301e356", size = 680692, upload-time = "2026-04-16T15:46:42.886Z" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2186,7 +2207,16 @@ decomposer-router = [
     { name = "datasets" },
     { name = "huggingface-hub" },
 ]
+decomposer-router-causal = [
+    { name = "accelerate" },
+    { name = "datasets" },
+    { name = "numpy" },
+    { name = "peft" },
+    { name = "torch" },
+    { name = "transformers" },
+]
 router = [
+    { name = "accelerate" },
     { name = "datasets" },
     { name = "numpy" },
     { name = "scikit-learn" },
@@ -2196,18 +2226,25 @@ router = [
 
 [package.metadata]
 requires-dist = [
+    { name = "accelerate", marker = "extra == 'decomposer-router-causal'", specifier = ">=0.26" },
+    { name = "accelerate", marker = "extra == 'router'", specifier = ">=0.26" },
     { name = "common", editable = "packages/common" },
     { name = "council-policies", editable = "packages/council_policies" },
     { name = "datasets", marker = "extra == 'decomposer-router'", specifier = ">=2.19" },
+    { name = "datasets", marker = "extra == 'decomposer-router-causal'", specifier = ">=2.19" },
     { name = "datasets", marker = "extra == 'router'", specifier = ">=2.19" },
     { name = "huggingface-hub", marker = "extra == 'decomposer-router'", specifier = ">=0.23" },
     { name = "llm-gateway", editable = "packages/llm_gateway" },
+    { name = "numpy", marker = "extra == 'decomposer-router-causal'", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'router'", specifier = ">=1.26" },
+    { name = "peft", marker = "extra == 'decomposer-router-causal'", specifier = ">=0.11" },
     { name = "scikit-learn", marker = "extra == 'router'", specifier = ">=1.3" },
+    { name = "torch", marker = "extra == 'decomposer-router-causal'", specifier = ">=2.2" },
     { name = "torch", marker = "extra == 'router'", specifier = ">=2.2" },
+    { name = "transformers", marker = "extra == 'decomposer-router-causal'", specifier = ">=4.52.4" },
     { name = "transformers", marker = "extra == 'router'", specifier = ">=4.52.4" },
 ]
-provides-extras = ["router", "decomposer-router"]
+provides-extras = ["router", "decomposer-router", "decomposer-router-causal"]
 
 [[package]]
 name = "transformers"
