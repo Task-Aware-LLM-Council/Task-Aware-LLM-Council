@@ -30,6 +30,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import hashlib
+
 from common import get_current_user
 from council_policies import (
     HFCausalGenerate,
@@ -40,6 +42,7 @@ from council_policies.policy_runner import (
     CouncilBenchmarkRunner,
     PolicyRuntime,
 )
+from council_policies.router import Subtask
 from datasets import load_dataset
 from llm_gateway import PromptRequest, Provider, ProviderConfig
 from model_orchestration import (
@@ -51,6 +54,81 @@ from model_orchestration import (
 
 SYNTHESIZER_ROLE = "synthesizer"
 SYNTHESIZER_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
+
+_DECOMPOSER_CACHE_PATH = Path("artifacts/p4_decomposer_cache.jsonl")
+
+
+class _CachingDecomposer:
+    """Disk-backed cache around Seq2SeqDecomposerRouter.decompose().
+    Key: sha256(prompt || context). Survives process restarts — plan-phase
+    crashes no longer re-spend decomposer time on already-seen prompts."""
+
+    def __init__(
+        self, inner: Seq2SeqDecomposerRouter, cache_path: Path,
+    ) -> None:
+        self._inner = inner
+        self._cache_path = cache_path
+        self._memory: dict[str, list[Subtask]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self._cache_path.exists():
+            return
+        with self._cache_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    self._memory[entry["key"]] = [
+                        Subtask(
+                            text=st["text"],
+                            order=st["order"],
+                            suggested_role=st.get("suggested_role"),
+                        )
+                        for st in entry["subtasks"]
+                    ]
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        print(f"Decomposer cache: loaded {len(self._memory)} entries")
+
+    @staticmethod
+    def _key(prompt: str, context: str) -> str:
+        return hashlib.sha256(
+            f"{prompt}||{context}".encode("utf-8")
+        ).hexdigest()
+
+    def _append(self, key: str, subtasks: list[Subtask]) -> None:
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._cache_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "key": key,
+                "subtasks": [
+                    {
+                        "text": st.text,
+                        "order": st.order,
+                        "suggested_role": st.suggested_role,
+                    }
+                    for st in subtasks
+                ],
+            }) + "\n")
+
+    async def decompose(
+        self, prompt: str, context: str = "",
+    ) -> list[Subtask]:
+        key = self._key(prompt, context)
+        if key in self._memory:
+            return self._memory[key]
+        subtasks = await self._inner.decompose(prompt, context)
+        self._memory[key] = subtasks
+        self._append(key, subtasks)
+        return subtasks
+
+    # Proxy any other attrs (e.g. max_subtasks) to the inner decomposer so
+    # callers that poke at the seq2seq internals still work.
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
 
 
 # Mirrors MusiqueProfile in packages/task_eval (commit 3370c0c) — oracle
@@ -171,6 +249,10 @@ def parse_args() -> argparse.Namespace:
                    help="Cap rows for smoke runs. None-equivalent via --limit -1.")
     p.add_argument("--out", type=Path, default=Path("p4_results.jsonl"))
     p.add_argument("--max-subtasks", type=int, default=4)
+    p.add_argument("--chunk-size", type=int, default=20,
+                   help="Flush results to disk after every N prompts. Specialists "
+                        "stay resident across chunks (one cold start total). "
+                        "Smaller = less work lost on crash, more per-chunk overhead.")
     return p.parse_args()
 
 
@@ -229,6 +311,7 @@ async def main() -> int:
         generate_fn=generate_fn,
         max_subtasks=args.max_subtasks,
     )
+    decomposer = _CachingDecomposer(decomposer, _DECOMPOSER_CACHE_PATH)
 
     policy = LearnedRouterPolicy(
         decomposer=decomposer,
@@ -257,27 +340,60 @@ async def main() -> int:
         for row in rows
     ]
 
+    chunk_size = max(1, args.chunk_size)
+    total_written = 0
+
     async with PolicyRuntime(
         specialist_config=specialist_config,
         synthesizer_config=synthesizer_config,
     ) as runtime:
-        runner = CouncilBenchmarkRunner(policies=(policy,), runtime=runtime)
-        print("Running P4 policy — specialists open lazily, synthesizer on demand")
-        benchmark_result = await runner.run(requests)
+        # Keep specialists/synth alive across chunks — the built-in runner
+        # closes them inside each runner.run(), which would cost a full cold
+        # start per chunk. PolicyRuntime.__aexit__ will do the real close.
+        real_close_specialists = runtime.close_specialists
+        real_close_synthesizer = runtime.close_synthesizer
 
-    mode = "a" if args.out.exists() else "w"
-    with args.out.open(mode, encoding="utf-8") as f:
-        for row, result in zip(rows, benchmark_result.results, strict=True):
-            f.write(json.dumps({
-                **row,
-                "p4_answer": result.response.text,
-                "predicted_route": result.metadata.get("predicted_route"),
-                "synthesis_used": result.metadata.get("synthesis_used"),
-                "error": result.metrics.error,
-                "latency_ms": result.metrics.latency_ms,
-            }) + "\n")
+        async def _noop() -> None:
+            return None
 
-    print(f"Wrote {len(benchmark_result.results)} results to {args.out}")
+        runtime.close_specialists = _noop  # type: ignore[method-assign]
+        runtime.close_synthesizer = _noop  # type: ignore[method-assign]
+
+        try:
+            runner = CouncilBenchmarkRunner(policies=(policy,), runtime=runtime)
+            print(
+                f"Running P4 policy over {len(rows)} prompts "
+                f"in chunks of {chunk_size} — specialists stay resident"
+            )
+
+            for chunk_start in range(0, len(rows), chunk_size):
+                chunk_end = min(chunk_start + chunk_size, len(rows))
+                chunk_rows = rows[chunk_start:chunk_end]
+                chunk_reqs = requests[chunk_start:chunk_end]
+                print(f"  chunk {chunk_start}-{chunk_end} ({len(chunk_rows)} prompts)")
+
+                benchmark_result = await runner.run(chunk_reqs)
+
+                mode = "a" if args.out.exists() else "w"
+                with args.out.open(mode, encoding="utf-8") as f:
+                    for row, result in zip(
+                        chunk_rows, benchmark_result.results, strict=True,
+                    ):
+                        f.write(json.dumps({
+                            **row,
+                            "p4_answer": result.response.text,
+                            "predicted_route": result.metadata.get("predicted_route"),
+                            "synthesis_used": result.metadata.get("synthesis_used"),
+                            "error": result.metrics.error,
+                            "latency_ms": result.metrics.latency_ms,
+                        }) + "\n")
+                total_written += len(chunk_rows)
+                print(f"  flushed — {total_written}/{len(rows)} total")
+        finally:
+            runtime.close_specialists = real_close_specialists  # type: ignore[method-assign]
+            runtime.close_synthesizer = real_close_synthesizer  # type: ignore[method-assign]
+
+    print(f"Wrote {total_written} results to {args.out}")
     return 0
 
 
