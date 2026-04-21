@@ -11,17 +11,25 @@ from pathlib import Path
 
 from task_eval.extraction import (
     extract_fever_label,
+    extract_math_answer,
     extract_qa_answer,
     extract_qa_answer_musique,
 )
-from task_eval.scoring import exact_match_multi, label_accuracy, token_f1_multi
+from task_eval.scoring import (
+    exact_match_multi,
+    label_accuracy,
+    math_exact_match,
+    token_f1_multi,
+)
 
 
 EXTRACTORS = {
     "MuSiQue": extract_qa_answer_musique,
     "HotpotQA": extract_qa_answer,
     "2WikiMultiHopQA": extract_qa_answer,
+    "QuALITY": extract_qa_answer,
     "FEVER": extract_fever_label,
+    "HARDMATH": extract_math_answer,
 }
 
 
@@ -68,6 +76,8 @@ def main():
 
             if source == "FEVER":
                 per_source[source]["acc"].append(label_accuracy(pred, gold[0]))
+            elif source == "HARDMATH":
+                per_source[source]["acc"].append(math_exact_match(pred, gold[0]))
             else:
                 per_source[source]["em"].append(exact_match_multi(pred, gold))
                 per_source[source]["f1"].append(token_f1_multi(pred, gold))

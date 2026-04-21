@@ -152,6 +152,34 @@ _MUSIQUE_CONSTRAINED_PROMPT = (
 )
 
 
+# Mirrors FeverProfile.row_to_case — forces the specialist to commit to one of
+# the three FEVER labels so extract_fever_label has a surface to match on.
+_FEVER_CONSTRAINED_PROMPT = (
+    "Context:\n{context}\n\n"
+    "Claim: {question}\n\n"
+    "Based on the provided context, verify the claim. "
+    "Answer strictly with one of these three labels: "
+    "SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+)
+
+
+# Mirrors QualityProfile.row_to_case — keep the specialist from padding the
+# answer with a full explanatory sentence (EM is 0 otherwise, F1 dragged down).
+_QUALITY_CONSTRAINED_PROMPT = (
+    "Context:\n{context}\n\n"
+    "Question: {question}\n\n"
+    "Answer the question concisely with just the answer."
+)
+
+
+# Mirrors HardMathProfile.row_to_case — extract_math_answer only parses the
+# last \boxed{...}, so without this instruction every math answer scores 0.
+_HARDMATH_CONSTRAINED_PROMPT = (
+    "{question}\n\n"
+    "Please put your final answer enclosed in \\boxed{{}}."
+)
+
+
 _MUSIQUE_ORACLE_CACHE = Path("artifacts/musique_oracle_map.json")
 
 
@@ -275,12 +303,16 @@ def build_requests(
 
         prompt_template: str | None = None
         if source == "MuSiQue":
-            if musique_oracle is None:
-                musique_oracle = _build_musique_oracle_map()
-            context = musique_oracle.get(
-                str(row.get("original_id", "")), context,
-            )
+            # Use router_dataset's context as-is (distractor-full). The CoT
+            # wrapper tells the specialist to search carefully; no is_supporting
+            # oracle injection from the upstream bdsaglam/musique source.
             prompt_template = _MUSIQUE_CONSTRAINED_PROMPT
+        elif source == "FEVER":
+            prompt_template = _FEVER_CONSTRAINED_PROMPT
+        elif source == "QuALITY":
+            prompt_template = _QUALITY_CONSTRAINED_PROMPT
+        elif source == "HARDMATH":
+            prompt_template = _HARDMATH_CONSTRAINED_PROMPT
 
         rows.append({
             "index": index,
