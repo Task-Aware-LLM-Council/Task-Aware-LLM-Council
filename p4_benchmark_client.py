@@ -275,13 +275,14 @@ def build_requests(
         if source == "MuSiQue":
             if musique_oracle is None:
                 musique_oracle = _build_musique_oracle_map()
-            oracle_ctx = musique_oracle.get(
+            # Oracle-only context gives the 4x lift. The CoT wrapper from
+            # MusiqueProfile is omitted: wrapping bloats the decomposer
+            # input to 3-4K tokens and collapses CPU decomposer throughput
+            # to ~1 row / 3 min. Oracle filter keeps the main accuracy win;
+            # specialists get short, distractor-free context.
+            context = musique_oracle.get(
                 str(row.get("original_id", "")), context,
             )
-            question = _MUSIQUE_CONSTRAINED_PROMPT.format(
-                context=oracle_ctx, question=question,
-            )
-            context = ""
 
         rows.append({
             "index": index,
