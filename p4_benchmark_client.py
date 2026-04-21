@@ -74,7 +74,15 @@ _MUSIQUE_CONSTRAINED_PROMPT = (
 )
 
 
+_MUSIQUE_ORACLE_CACHE = Path("artifacts/musique_oracle_map.json")
+
+
 def _build_musique_oracle_map() -> dict[str, str]:
+    if _MUSIQUE_ORACLE_CACHE.exists():
+        print(f"Using cached Musique oracle map at {_MUSIQUE_ORACLE_CACHE}")
+        return json.loads(_MUSIQUE_ORACLE_CACHE.read_text(encoding="utf-8"))
+
+    print("Building Musique oracle map from bdsaglam/musique:validation ...")
     src = load_dataset("bdsaglam/musique", split="validation")
     mapping: dict[str, str] = {}
     for row in src:
@@ -93,7 +101,27 @@ def _build_musique_oracle_map() -> dict[str, str]:
         mapping[str(row.get("id", ""))] = "\n\n".join(
             p.strip() for p in supporting if p and p.strip()
         )
+
+    _MUSIQUE_ORACLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    _MUSIQUE_ORACLE_CACHE.write_text(json.dumps(mapping), encoding="utf-8")
+    print(f"Cached {len(mapping)} rows to {_MUSIQUE_ORACLE_CACHE}")
     return mapping
+
+
+def _load_done_indices(out_path: Path) -> set[int]:
+    if not out_path.exists():
+        return set()
+    done: set[int] = set()
+    with out_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                done.add(int(json.loads(line)["index"]))
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
+    return done
 
 
 def build_synthesizer_config() -> OrchestratorConfig:
@@ -146,7 +174,9 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def build_requests(dataset_name: str, split: str, limit: int) -> list[dict]:
+def build_requests(
+    dataset_name: str, split: str, limit: int, skip_indices: set[int],
+) -> list[dict]:
     ds = load_dataset(dataset_name, split=split)
     musique_oracle: dict[str, str] | None = None
 
@@ -154,13 +184,14 @@ def build_requests(dataset_name: str, split: str, limit: int) -> list[dict]:
     for index, row in enumerate(ds):
         if limit >= 0 and index >= limit:
             break
+        if index in skip_indices:
+            continue
         source = row.get("source_dataset", "")
         question = row["question"]
         context = row.get("context", "") or ""
 
         if source == "MuSiQue":
             if musique_oracle is None:
-                print("Loading Musique oracle context map (one-time ~30s)...")
                 musique_oracle = _build_musique_oracle_map()
             oracle_ctx = musique_oracle.get(
                 str(row.get("original_id", "")), context,
@@ -209,8 +240,14 @@ async def main() -> int:
     specialist_config = build_default_local_vllm_orchestrator_config()
     synthesizer_config = build_synthesizer_config()
 
-    rows = build_requests(args.dataset, args.split, args.limit)
+    done_indices = _load_done_indices(args.out)
+    if done_indices:
+        print(f"Resuming: {len(done_indices)} rows already in {args.out}, skipping.")
+    rows = build_requests(args.dataset, args.split, args.limit, done_indices)
     print(f"Built {len(rows)} prompt requests from {args.dataset}:{args.split}")
+    if not rows:
+        print("Nothing to do — all rows already completed.")
+        return 0
 
     requests = [
         PromptRequest(
@@ -228,7 +265,8 @@ async def main() -> int:
         print("Running P4 policy — specialists open lazily, synthesizer on demand")
         benchmark_result = await runner.run(requests)
 
-    with args.out.open("w", encoding="utf-8") as f:
+    mode = "a" if args.out.exists() else "w"
+    with args.out.open(mode, encoding="utf-8") as f:
         for row, result in zip(rows, benchmark_result.results, strict=True):
             f.write(json.dumps({
                 **row,
