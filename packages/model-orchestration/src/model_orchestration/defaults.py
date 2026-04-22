@@ -132,6 +132,7 @@ def build_default_local_vllm_orchestrator_config(
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
     preset: LocalVLLMPresetConfig | None = None,
+    sequential_local_gpu: bool = False,
 ) -> OrchestratorConfig:
     active_preset = preset or LocalVLLMPresetConfig(bind=DEFAULT_LOCAL_VLLM_BIND)
     if active_preset.bind is None:
@@ -177,7 +178,7 @@ def build_default_local_vllm_orchestrator_config(
                     default_params=_local_vllm_params(
                         active_preset,
                         role=role,
-                        port=active_preset.base_port + offset,
+                        port=active_preset.base_port + (0 if sequential_local_gpu else offset),
                     ),
                 ),
             )
@@ -186,6 +187,7 @@ def build_default_local_vllm_orchestrator_config(
         default_role="general",
         recording=recording,
         mode_label=mode_label or "local",
+        sequential_local_gpu=sequential_local_gpu,
     )
 
 

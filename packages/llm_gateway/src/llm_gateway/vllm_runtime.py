@@ -44,7 +44,7 @@ class VLLMRuntimeConfig:
     server_host: str = "0.0.0.0"
     port: int = 8000
     executable: str = "apptainer"
-    startup_timeout_seconds: float = 120.0
+    startup_timeout_seconds: float = 1800.0
     poll_interval_seconds: float = 1.0
     extra_args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=dict)
@@ -105,7 +105,7 @@ def build_vllm_runtime_config(config: ProviderConfig) -> VLLMRuntimeConfig | Non
         port=int(config.default_params.get(LOCAL_LAUNCH_PORT, 8000)),
         executable=str(config.default_params.get(LOCAL_LAUNCH_EXECUTABLE, "apptainer")),
         startup_timeout_seconds=float(
-            config.default_params.get(LOCAL_LAUNCH_STARTUP_TIMEOUT, 120.0)
+            config.default_params.get(LOCAL_LAUNCH_STARTUP_TIMEOUT, 1800.0)
         ),
         poll_interval_seconds=float(
             config.default_params.get(LOCAL_LAUNCH_POLL_INTERVAL, 1.0)
@@ -191,6 +191,7 @@ class VLLMRuntime:
         return replace(normalize_local_provider_config(base_config), api_base=api_base)
 
     async def _wait_until_ready(self) -> None:
+        print(f"[vLLM] waiting for model to be ready (timeout={self.config.startup_timeout_seconds}s, port={self.config.port})")
         deadline = monotonic() + self.config.startup_timeout_seconds
         models_url = self.api_base.removesuffix("/chat/completions").rstrip("/") + "/models"
 

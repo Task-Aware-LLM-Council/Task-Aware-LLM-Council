@@ -93,6 +93,8 @@ class ModelOrchestrator:
         self._managed_clients: dict[str, _ManagedRoleClient] = {}
         self._client_builder = client_builder
         self._provider_config_resolver = provider_config_resolver
+        self._local_gpu_lock: asyncio.Lock | None = asyncio.Lock() if config.sequential_local_gpu else None
+        self._active_local_role: str | None = None
 
         for spec in config.models:
             self._register_model(spec)
@@ -120,6 +122,10 @@ class ModelOrchestrator:
         *,
         max_parallel: int | None = None,
     ) -> None:
+        if self._local_gpu_lock is not None:
+            print("[sequential GPU] load_all skipped — models will load on demand via hot-swap")
+            return
+
         print(f"Load all called with maxParallel={max_parallel}")
         managed_clients = self._managed_clients_for_targets(targets)
         if not managed_clients:
@@ -150,9 +156,23 @@ class ModelOrchestrator:
     ) -> OrchestratorResponse:
         normalized_request, resolved_alias = self._normalize_run_request(request, target=target)
         role = self._canonical_role(resolved_alias)
+
+        if self._local_gpu_lock is not None and self._is_local_role(role):
+            async with self._local_gpu_lock:
+                await self._swap_to_local_role(role)
+                return await self._run_for_role(normalized_request, resolved_alias, role)
+
+        return await self._run_for_role(normalized_request, resolved_alias, role)
+
+    async def _run_for_role(
+        self,
+        request: PromptRequest,
+        resolved_alias: str,
+        role: str,
+    ) -> OrchestratorResponse:
         spec = self._role_specs[role]
         managed_client = self._managed_client_for(role)
-        prepared_request = _merge_request_defaults(normalized_request, spec)
+        prepared_request = _merge_request_defaults(request, spec)
         request_payload = _request_to_payload(prepared_request)
         event_id = self.recorder.record_request(
             target=role,
@@ -361,6 +381,18 @@ class ModelOrchestrator:
         for managed_client in reversed(opened_now):
             await managed_client.close()
         raise first_error
+
+    async def _swap_to_local_role(self, role: str) -> None:
+        if self._active_local_role == role:
+            return
+        if self._active_local_role is not None and self._active_local_role in self._managed_clients:
+            print(f"[sequential GPU] Unloading {self._active_local_role}")
+            await self._managed_clients[self._active_local_role].close()
+        print(f"[sequential GPU] Loading {role}")
+        self._active_local_role = role
+
+    def _is_local_role(self, role: str) -> bool:
+        return _provider_name(self._role_specs[role].provider_config.provider) == "local"
 
     def _normalize_run_request(
         self,

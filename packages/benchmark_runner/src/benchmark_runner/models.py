@@ -30,6 +30,10 @@ class AggregateMetricRow:
     failed_examples: int = 0
     total_examples: int = 0
     summary_path: Path | None = None
+    avg_latency_s: float | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -82,6 +86,10 @@ class ScoreSummary:
     skipped_examples: int
     aggregated_metrics: dict[str, float] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    avg_latency_s: float | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(slots=True, frozen=True)

@@ -52,7 +52,8 @@ async def run_benchmark_suite(
     *,
     metric_resolver: MetricResolver | None = None,
     pipeline_runner=run_benchmark,
-    delay_between_runs=5
+    delay_between_runs=5,
+    client_stats_provider=None,  # callable() -> dict, called after all batches for a source
 ) -> BenchmarkSuiteResult:
     sources = tuple(dataset_sources)
     suite_id = spec.suite_name or default_suite_id()
@@ -175,12 +176,15 @@ async def run_benchmark_suite(
                 elapsed = end_time - start_time
                 print(f"Finished running for model:{model} - source:{source.name} in {elapsed:.2f} seconds")
                 total_pairs += 1
+
+                client_stats = client_stats_provider() if client_stats_provider else None
                 summary = _build_summary(
                     suite_id=suite_id,
                     dataset_name=source.name,
                     model=model,
                     metric_name=_metric_name(metric, source),
                     records=pair_records,
+                    client_stats=client_stats,
                 )
                 write_summary(pair_summary_path, summary)
                 aggregate_rows.append(
@@ -196,9 +200,14 @@ async def run_benchmark_suite(
                         failed_examples=summary.failed_examples,
                         total_examples=summary.total_examples,
                         summary_path=pair_summary_path,
+                        avg_latency_s=summary.avg_latency_s,
+                        total_input_tokens=summary.total_input_tokens,
+                        total_output_tokens=summary.total_output_tokens,
+                        total_tokens=summary.total_tokens,
                     )
                 )
 
+                _print_dataset_summary(source.name, model, summary)
                 print(f"Done running for model:{model} - source:{source.name}")
 
     aggregate_path = aggregate_summary_path(suite_dir)
@@ -334,12 +343,14 @@ def _build_summary(
     model: str,
     metric_name: str,
     records: list[dict[str, object]],
+    client_stats: dict | None = None,
 ) -> ScoreSummary:
     scored_records = [
         record for record in records if record.get("status") == "scored"]
     failed_records = [
         record for record in records if record.get("status") != "scored"]
 
+    stats = client_stats or {}
     return ScoreSummary(
         suite_id=suite_id,
         dataset_name=dataset_name,
@@ -350,6 +361,26 @@ def _build_summary(
         failed_examples=len(failed_records),
         skipped_examples=0,
         aggregated_metrics=aggregate_score_records(scored_records),
+        avg_latency_s=stats.get("avg_latency_s"),
+        total_input_tokens=stats.get("total_input_tokens"),
+        total_output_tokens=stats.get("total_output_tokens"),
+        total_tokens=stats.get("total_tokens"),
+    )
+
+
+def _print_dataset_summary(dataset_name: str, model: str, summary: "ScoreSummary") -> None:
+    acc = summary.aggregated_metrics.get(summary.metric_name)
+    acc_str = f"{acc:.4f}" if acc is not None else "n/a"
+    lat_str = f"{summary.avg_latency_s:.1f}s" if summary.avg_latency_s is not None else "n/a"
+    tok_str = str(summary.total_tokens) if summary.total_tokens is not None else "n/a"
+    in_str = str(summary.total_input_tokens) if summary.total_input_tokens is not None else "n/a"
+    out_str = str(summary.total_output_tokens) if summary.total_output_tokens is not None else "n/a"
+    print(
+        f"\n=== Dataset Results: {dataset_name} | model: {model} ===\n"
+        f"  accuracy ({summary.metric_name}): {acc_str}\n"
+        f"  scored/total examples:            {summary.scored_examples}/{summary.total_examples}\n"
+        f"  avg latency per example:          {lat_str}\n"
+        f"  total tokens:                     {tok_str}  (input={in_str}, output={out_str})\n"
     )
 
 
@@ -372,6 +403,7 @@ async def run_registered_benchmark_suite(
     profile_kwargs: dict[str, dict[str, object]] | None = None,
     profile_resolver: Callable[..., DatasetProfile] = get_dataset_profile,
     pipeline_runner=run_benchmark,
+    client_stats_provider=None,
 ) -> BenchmarkSuiteResult:
     profile_kwargs = profile_kwargs or {}
     profiles: list[DatasetProfile] = []
@@ -392,4 +424,5 @@ async def run_registered_benchmark_suite(
         spec,
         metric_resolver=lambda source: source,
         pipeline_runner=pipeline_runner,
+        client_stats_provider=client_stats_provider,
     )

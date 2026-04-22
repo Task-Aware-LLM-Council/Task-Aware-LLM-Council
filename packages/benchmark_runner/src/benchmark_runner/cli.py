@@ -81,8 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gpu-utilization",
         type=float,
-        default=0.33,
-        help="Optional provider endpoint override. Required for `local` and useful for other HTTP-backed providers.",
+        default=None,
+        help=(
+            "GPU memory utilization fraction for local vLLM servers. "
+            "Defaults to 0.90 with --single-gpu, 0.33 otherwise."
+        ),
     )
 
     parser.add_argument(
@@ -95,21 +98,45 @@ def build_parser() -> argparse.ArgumentParser:
         default="p1",
         help="Which council policy to run. p1=single model baseline, p2=flat council with voting and synthesis.",
     )
+    parser.add_argument(
+        "--single-gpu",
+        action="store_true",
+        default=False,
+        help=(
+            "Sequential single-GPU mode for --provider vllm. "
+            "Models hot-swap on a shared GPU instead of running 3 servers in parallel. "
+            "Automatically raises --gpu-utilization default to 0.90."
+        ),
+    )
+    parser.add_argument(
+        "--suite-name",
+        default=None,
+        help=(
+            "Fixed suite directory name (e.g. 'suite_20260421T170856Z'). "
+            "Re-using an existing name with skip_existing=True lets you resume a partial run "
+            "without re-running already-completed dataset/model pairs."
+        ),
+    )
     return parser
 
 
 async def run_cli_async(args: argparse.Namespace) -> int:
+    if args.gpu_utilization is None:
+        args.gpu_utilization = 0.90 if getattr(args, "single_gpu", False) else 0.33
+
     output_root = Path(args.output_root)
     spec = get_preset_spec(args.preset, output_root=output_root)
+    if args.suite_name:
+        spec = replace(spec, suite_name=args.suite_name)
     if args.provider or args.api_base or args.api_key_env:
         provider = args.provider or spec.provider_config.provider
 
         new_params = dict(spec.provider_config.default_params)
         if provider == "vllm":
             provider = Provider.LOCAL
-            new_params[LOCAL_LAUNCH_IMAGE] = "vllm-openai_latest.sif"
+            new_params[LOCAL_LAUNCH_IMAGE] = "/scratch1/sureshag/Task-Aware-LLM-Council/vllm-openai_latest.sif"
             new_params[LOCAL_LAUNCH_BIND] = f"/scratch1/{get_current_user()}/.cache"
-            new_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] = 600
+            new_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] = 1200
 
             # new_params[LOCAL_LAUNCH_QUANTIZATION] = 'bitsandbytes'
             # new_params[LOCAL_LAUNCH_LOAD_FORMAT] = 'bitsandbytes'
@@ -169,7 +196,7 @@ async def _run_p2(spec, args):
     provider = args.provider or "openai-compatible"
 
     if provider == "vllm":
-        # Local vLLM on CARC: start 3 servers at base_port, base_port+1, base_port+2
+        single_gpu = getattr(args, "single_gpu", False)
         orchestrator_config = build_default_local_vllm_orchestrator_config(
             qa_model=_P2_QA_MODEL,
             reasoning_model=_P2_REASONING_MODEL,
@@ -178,8 +205,12 @@ async def _run_p2(spec, args):
                 base_port=args.local_launch_port,
                 gpu_memory_utilization=args.gpu_utilization,
                 bind=f"/scratch1/{get_current_user()}/.cache",
+                startup_timeout_seconds=1800.0,
             ),
+            sequential_local_gpu=single_gpu,
         )
+        if single_gpu:
+            print(f"[P2] Single-GPU sequential mode: models hot-swap on port {args.local_launch_port} (gpu_util={args.gpu_utilization})")
     else:
         # API-based (NVIDIA, OpenRouter, etc.)
         orchestrator_config = build_default_orchestrator_config(
@@ -200,6 +231,14 @@ async def _run_p2(spec, args):
     dummy_provider_config = ProviderConfig(provider="openai-compatible")
     spec = dc_replace(spec, models=(_P2_COUNCIL_MODEL,), provider_config=dummy_provider_config)
 
+    # Set max_concurrency to sample_cap (or a default of 8) so all examples
+    # race through each stage together — same-role calls cluster, and the
+    # sequential GPU lock serves them all off one model load per stage.
+    sample_cap = spec.max_examples_per_dataset or 8
+    if getattr(args, "single_gpu", False):
+        spec = dc_replace(spec, max_concurrency=sample_cap)
+        print(f"[P2] Single-GPU: max_concurrency set to {sample_cap} (batch all examples per stage)")
+
     async with ModelOrchestrator(orchestrator_config) as orch:
         # Pre-warm all 3 vLLM servers in parallel before inference starts
         print("[P2] Loading all specialist models...")
@@ -211,8 +250,17 @@ async def _run_p2(spec, args):
         async def pipeline_runner(datasets, pipeline_config):
             return await run_benchmark(datasets, pipeline_config, client=client)
 
+        # Respect --datasets if provided; otherwise fall back to default P2 router_dataset
+        from benchmark_runner.config import get_dataset_configs, DATASET_CONFIGS
+        if args.datasets:
+            p2_datasets = get_dataset_configs(tuple(args.datasets))
+        else:
+            p2_datasets = P2_DATASET_CONFIGS
+
         return await run_registered_benchmark_suite(
-            P2_DATASET_CONFIGS, spec, pipeline_runner=pipeline_runner
+            p2_datasets, spec,
+            pipeline_runner=pipeline_runner,
+            client_stats_provider=lambda: client.stats,
         )
 
 

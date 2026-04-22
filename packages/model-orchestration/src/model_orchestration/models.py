@@ -18,9 +18,9 @@ class JSONLRecordingConfig:
 @dataclass(slots=True, frozen=True)
 class LocalVLLMPresetConfig:
     base_port: int = 8000
-    image: str = "vllm-openai_latest.sif"
+    image: str = "/scratch1/sureshag/Task-Aware-LLM-Council/vllm-openai_latest.sif"
     bind: str | None = None
-    startup_timeout_seconds: float = 600.0
+    startup_timeout_seconds: float = 1800.0
     max_model_len: str = "8192"
     gpu_memory_utilization: float = 0.30       
     quantization: str = "compressed-tensors"
@@ -55,6 +55,7 @@ class OrchestratorConfig:
     default_role: ModelRole
     recording: JSONLRecordingConfig | None = None
     mode_label: str | None = None
+    sequential_local_gpu: bool = False
 
 
 @dataclass(slots=True, frozen=True)

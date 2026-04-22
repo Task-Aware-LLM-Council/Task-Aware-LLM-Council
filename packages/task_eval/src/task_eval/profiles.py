@@ -188,6 +188,9 @@ class QualityProfile(BaseDatasetProfile):
             full_text = document.get("text", "")
             article = full_text[:120000] if full_text else ""
 
+        # Truncate to ~4000 chars to stay within 8192 token limit across all P2 stages
+        article = article[:4000] if article else ""
+
         options = _as_list(_first_present(
             row, "options", "choices", default=[]))
         example_id = str(_first_present(
