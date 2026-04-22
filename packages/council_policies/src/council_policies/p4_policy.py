@@ -288,9 +288,22 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 )
             )
 
+        # Mirror the template the specialists saw so the synthesizer respects
+        # the same answer-format constraint (FEVER labels, \boxed{} for math,
+        # 'Final Answer:' sentinel for MuSiQue). Without this the synthesizer
+        # rewrites the constrained specialist output into prose and strict
+        # extractors miss it.
+        template = (state.request.metadata or {}).get("specialist_prompt_template")
+        synth_question = state.request.user_prompt or ""
+        if template:
+            synth_question = template.format(
+                context=state.request.context or "",
+                question=synth_question,
+            )
+
         synthesizer_orchestrator = await runtime.get_synthesizer_orchestrator()
         synthesis_result = await synthesize_ordered(
-            question=state.request.user_prompt or "",
+            question=synth_question,
             runs=runs,
             orchestrator=synthesizer_orchestrator,
             synthesizer_role=self.synthesizer_role,
