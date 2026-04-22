@@ -43,6 +43,27 @@ _LAST_LINE_SOURCES = {"MuSiQue", "QuALITY", "FEVER"}
 _ORIGINAL_ID_KEYS = ("original_id", "id", "musique_id")
 _ANSWERABLE_KEYS = ("answerable", "is_answerable")
 
+# Abstention sentinels the MuSiQue-style template may produce. The P4
+# `_MUSIQUE_CONSTRAINED_PROMPT` instructs the model to say
+# "NOT PRESENT IN CONTEXT" rather than "NOT_FOUND", so matching only the
+# latter would never credit abstention even on a perfectly-behaved model.
+_ABSTAIN_SENTINELS = frozenset({
+    "NOT_FOUND",
+    "NOT FOUND",
+    "NOT PRESENT IN CONTEXT",
+    "NOT PRESENT",
+    "UNANSWERABLE",
+    "CANNOT BE ANSWERED",
+    "CANNOT ANSWER",
+    "NO ANSWER",
+    "I DON'T KNOW",
+})
+
+
+def _is_abstention(text: str) -> bool:
+    """Case-insensitive abstention sentinel match on stripped text."""
+    return (text or "").strip().rstrip(".").upper() in _ABSTAIN_SENTINELS
+
 
 def _extract_answer(response: str, source: str) -> str:
     """P3-style priority extraction. Preserves NOT_FOUND sentinel."""
@@ -204,7 +225,7 @@ def main():
                 # unanswerable row scores EM=1, F1=1.
                 if (
                     source == "MuSiQue"
-                    and pred == "NOT_FOUND"
+                    and _is_abstention(pred)
                     and answerable_map.get(row.get("index")) is False
                 ):
                     per_source[source]["em"].append(1.0)
