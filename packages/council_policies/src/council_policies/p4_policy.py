@@ -235,9 +235,7 @@ class LearnedRouterPolicy(BasePolicyAdapter):
                 "router_fallback_used": [d.fallback_used for d in decisions],
                 "synthesizer_role": self.synthesizer_role,
                 "synthesis_used": len(run_payloads) > 1,
-                "predicted_route": (
-                    runs[0].role if len(runs) == 1 else [r.role for r in runs]
-                ),
+                "predicted_route": [r.role for r in runs],
                 "router_type": (
                     "Seq2SeqDecomposerRouter"
                     if self.use_joint_model

@@ -1,7 +1,22 @@
-"""Score a P4 benchmark JSONL, broken down by source_dataset.
+"""Score a P4 benchmark JSONL using P3's compute_metrics logic.
+
+Mirrors the P3 `council_policies.cli:compute_metrics` scoring path as
+described in the session handoff:
+  - _extract_answer priority: (1) `Final Answer:` regex, (2) last non-empty
+    line for musique|quality|fever, (3) full stripped response.
+  - FEVER       : label_accuracy (whole-word SUPPORT/REFUTE/NOT ENOUGH INFO).
+  - HARDMATH    : `\\boxed{}` extraction on both pred AND gold, then EM.
+  - MuSiQue     : exact_match_multi + token_f1_multi (best-of-golds).
+  - QuALITY     : exact_match_multi + token_f1_multi.
+  - NOT_FOUND abstention: preserved but NOT rewarded here — router_dataset
+    doesn't carry the `answerable` flag needed for P3's MuSiQue abstention
+    bonus. See handoff doc.
+
+HumanEvalPlus pass@1 is scored separately via score_humaneval_pass1.py.
 
 Usage:
-    uv run --package council_policies python scratch/score_p4_results.py \\
+    OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 \\
+        uv run --package task_eval python scratch/score_p4_results.py \\
         --results p4_gemma_lora_v2.jsonl
 """
 import argparse
@@ -10,31 +25,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from task_eval.extraction import (
-    extract_fever_label,
-    extract_math_answer,
-    extract_qa_answer,
-    extract_qa_answer_musique,
-)
-
-
-_SENTINEL_RE = re.compile(
-    r"(?:the answer is|answer:|final answer:)", re.IGNORECASE
-)
-_LAST_BOLD_RE = re.compile(r"\*\*([^*\n]+?)\*\*")
-
-
-def extract_qa_answer_musique_relaxed(response: str) -> str:
-    """Fallback: if no sentinel present, return the last bold span."""
-    response = (response or "").strip()
-    if not response:
-        return ""
-    if _SENTINEL_RE.search(response):
-        return extract_qa_answer_musique(response)
-    bolds = _LAST_BOLD_RE.findall(response)
-    if bolds:
-        return bolds[-1].strip()
-    return extract_qa_answer_musique(response)
+from task_eval.extraction import extract_math_answer
 from task_eval.scoring import (
     exact_match_multi,
     label_accuracy,
@@ -43,14 +34,32 @@ from task_eval.scoring import (
 )
 
 
-EXTRACTORS = {
-    "MuSiQue": extract_qa_answer_musique_relaxed,
-    "HotpotQA": extract_qa_answer,
-    "2WikiMultiHopQA": extract_qa_answer,
-    "QuALITY": extract_qa_answer,
-    "FEVER": extract_fever_label,
-    "HARDMATH": extract_math_answer,
-}
+_FINAL_ANSWER_RE = re.compile(
+    r"(?:final answer|the answer is|answer)\s*[:\-]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_LAST_LINE_SOURCES = {"MuSiQue", "QuALITY", "FEVER"}
+
+
+def _extract_answer(response: str, source: str) -> str:
+    """P3-style priority extraction. Preserves NOT_FOUND sentinel."""
+    response = (response or "").strip()
+    if not response:
+        return ""
+    if response == "NOT_FOUND":
+        return "NOT_FOUND"
+
+    matches = _FINAL_ANSWER_RE.findall(response)
+    if matches:
+        return matches[-1].strip().rstrip(".")
+
+    if source in _LAST_LINE_SOURCES:
+        for line in reversed(response.splitlines()):
+            stripped = line.strip()
+            if stripped:
+                return stripped.rstrip(".")
+
+    return response
 
 
 def _gold_as_list(gold):
@@ -77,20 +86,23 @@ def main():
                 continue
             row = json.loads(line)
             source = row.get("source_dataset") or "UNKNOWN"
+            if source == "HumanEvalPlus":
+                # Scored separately via score_humaneval_pass1.py (execution).
+                continue
             per_source[source]["n"] += 1
             if row.get("error"):
                 per_source[source]["errors"] += 1
                 continue
 
-            extractor = EXTRACTORS.get(source, extract_qa_answer)
             pred_raw = row.get("p4_answer") or ""
-            pred = extractor(pred_raw)
 
-            gold_field = "gold_answer"
-            if source == "FEVER":
-                gold_field = "gold_label"
+            if source == "HARDMATH":
+                pred = extract_math_answer(pred_raw)
+            else:
+                pred = _extract_answer(pred_raw, source)
+
+            gold_field = "gold_label" if source == "FEVER" else "gold_answer"
             gold = _gold_as_list(row.get(gold_field))
-
             if not gold:
                 continue
 
@@ -98,7 +110,9 @@ def main():
                 per_source[source]["acc"].append(label_accuracy(pred, gold[0]))
             elif source == "HARDMATH":
                 gold_extracted = extract_math_answer(gold[0])
-                per_source[source]["acc"].append(math_exact_match(pred, gold_extracted))
+                per_source[source]["acc"].append(
+                    math_exact_match(pred, gold_extracted)
+                )
             else:
                 per_source[source]["em"].append(exact_match_multi(pred, gold))
                 per_source[source]["f1"].append(token_f1_multi(pred, gold))
