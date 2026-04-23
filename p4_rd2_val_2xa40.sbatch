@@ -97,7 +97,8 @@ done
 echo "All 4 servers up. Running P4 client..."
 uv run --package council_policies --with peft python p4_benchmark_client.py \
   --pre-launched \
-  --dataset task-aware-llm-council/router_dataset-2 \
+  --decomposer-device cuda:0\ 
+ --dataset task-aware-llm-council/router_dataset-2 \
   --split validation \
   --limit -1 \
   --chunk-size 300 \
