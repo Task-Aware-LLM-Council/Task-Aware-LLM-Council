@@ -4,16 +4,16 @@
 # + decomposer all co-resident on GPU 0. Fastest queue (a40:1 backfills into
 # most fragments).
 #
-# Layout (all on GPU 0, 46GB total):
-#   port 8001 qa          (gemma-2-9b-it-GPTQ,       ~5GB weights)
-#   port 8002 reasoning   (DeepSeek-R1-Qwen-7B-AWQ,  ~5GB weights)
-#   port 8003 general     (Qwen2.5-14B-AWQ,          ~9GB weights)
-#   port 8004 synth       (DeepSeek-R1-Qwen-7B-AWQ,  ~5GB weights)
-#   + in-process decomposer on CPU (Gemma-2-2B)   -- keeps GPU free for vLLM
-# Budget: 4 × 0.22 × 46GB ≈ 40GB vLLM, ~6GB headroom. Launches staggered by
-# 30s to avoid concurrent memory-reservation races. Max model len lowered to
-# 4096 so KV cache fits — QuALITY >4096-token contexts will be truncated; if
-# scoring later shows QuALITY regression vs A100 baseline, revert that one.
+# Layout (all on GPU 0, 46GB total). ONLY 3 vLLM servers — synth reuses the
+# reasoning server on port 8002 (same DS-R1-Qwen-7B model) to avoid
+# duplicating ~8GB of weights on a card where every GB matters:
+#   port 8001 qa         (gemma-2-9b-it-GPTQ,      9.5GB weights, util 0.32)
+#   port 8002 reasoning+synth (DS-R1-Qwen-7B-AWQ,   8GB weights, util 0.26)
+#   port 8003 general    (Qwen2.5-14B-AWQ,         10GB weights, util 0.28)
+#   + in-process decomposer on CPU (Gemma-2-2B) — keeps GPU free for vLLM
+# Budget: 0.86 × 46GB ≈ 39.6GB vLLM, ~6.4GB headroom. Staggered 30s apart
+# to dodge concurrent memory-reservation races. max-model-len=4096; QuALITY
+# contexts >4096 tokens will truncate (revisit if scoring flags QuALITY).
 #
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a40:1
@@ -51,13 +51,13 @@ MODELS=(
     "task-aware-llm-council/gemma-2-9b-it-GPTQ"
     "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
     "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
-    "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
 )
-PORTS=(8001 8002 8003 8004)
-# 4 servers share one 46GB A40. Budget: 4 * 0.22 * 46 ~= 40GB, ~6GB headroom.
-# Decomposer moves to CPU in this mode to avoid a 5th load on the same card.
-GPU_UTIL=(0.22 0.22 0.22 0.22)
-QUANT=("compressed-tensors" "compressed-tensors" "compressed-tensors" "compressed-tensors")
+PORTS=(8001 8002 8003)
+# Per-model util tuned to observed weight sizes. Sum = 0.86 × 46 ≈ 39.6GB.
+# The reasoning server (port 8002) also serves synth requests via the client
+# config's _PRE_LAUNCHED_SYNTH_PORT alias.
+GPU_UTIL=(0.32 0.26 0.28)
+QUANT=("compressed-tensors" "compressed-tensors" "compressed-tensors")
 
 SERVER_PIDS=()
 cleanup() {
@@ -69,7 +69,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for i in 0 1 2 3; do
+for i in 0 1 2; do
     echo "Starting ${MODELS[$i]} on port ${PORTS[$i]} (GPU 0, util ${GPU_UTIL[$i]})..."
     apptainer run --nv --cleanenv \
         --bind "${CACHE_DIR}:${CACHE_DIR}" \
@@ -90,7 +90,7 @@ for i in 0 1 2 3; do
     sleep 30
 done
 
-echo "Waiting for all 4 vLLM servers..."
+echo "Waiting for all 3 vLLM servers..."
 for port in "${PORTS[@]}"; do
     deadline=$((SECONDS + 900))
     until curl -sf "http://127.0.0.1:${port}/v1/models" > /dev/null 2>&1; do
@@ -104,7 +104,7 @@ for port in "${PORTS[@]}"; do
     echo "  port ${port} ready."
 done
 
-echo "All 4 servers up. Running P4 client..."
+echo "All 3 servers up. Running P4 client..."
 uv run --package council_policies --with peft python p4_benchmark_client.py \
   --pre-launched \
   --decomposer-device cpu \
