@@ -9,9 +9,11 @@
 #   port 8002 reasoning   (DeepSeek-R1-Qwen-7B-AWQ,  ~5GB weights)
 #   port 8003 general     (Qwen2.5-14B-AWQ,          ~9GB weights)
 #   port 8004 synth       (DeepSeek-R1-Qwen-7B-AWQ,  ~5GB weights)
-#   + in-process decomposer on cuda:0 (Gemma-2-2B,    ~5GB)
-# = ~29GB weights + per-server KV caches at gpu_memory_utilization 0.18 each
-#   (4 × 0.18 = 0.72 of 46GB ≈ 33GB) + decomposer ~5GB ≈ 38GB. ~8GB headroom.
+#   + in-process decomposer on CPU (Gemma-2-2B)   -- keeps GPU free for vLLM
+# Budget: 4 × 0.22 × 46GB ≈ 40GB vLLM, ~6GB headroom. Launches staggered by
+# 30s to avoid concurrent memory-reservation races. Max model len lowered to
+# 4096 so KV cache fits — QuALITY >4096-token contexts will be truncated; if
+# scoring later shows QuALITY regression vs A100 baseline, revert that one.
 #
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a40:1
@@ -52,7 +54,9 @@ MODELS=(
     "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
 )
 PORTS=(8001 8002 8003 8004)
-GPU_UTIL=(0.18 0.18 0.18 0.18)
+# 4 servers share one 46GB A40. Budget: 4 * 0.22 * 46 ~= 40GB, ~6GB headroom.
+# Decomposer moves to CPU in this mode to avoid a 5th load on the same card.
+GPU_UTIL=(0.22 0.22 0.22 0.22)
 QUANT=("compressed-tensors" "compressed-tensors" "compressed-tensors" "compressed-tensors")
 
 SERVER_PIDS=()
@@ -78,9 +82,12 @@ for i in 0 1 2 3; do
         --port "${PORTS[$i]}" \
         --gpu-memory-utilization "${GPU_UTIL[$i]}" \
         --quantization "${QUANT[$i]}" \
-        --max-model-len 8192 \
+        --max-model-len 4096 \
         > "p4_vllm_${PORTS[$i]}.log" 2>&1 &
     SERVER_PIDS+=($!)
+    # Stagger launches so each server finishes reserving GPU memory before the
+    # next starts its free-memory probe. Concurrent launches race and lose.
+    sleep 30
 done
 
 echo "Waiting for all 4 vLLM servers..."
@@ -100,7 +107,7 @@ done
 echo "All 4 servers up. Running P4 client..."
 uv run --package council_policies --with peft python p4_benchmark_client.py \
   --pre-launched \
-  --decomposer-device cuda:0 \
+  --decomposer-device cpu \
   --dataset task-aware-llm-council/router_dataset-2 \
   --split validation \
   --limit -1 \
