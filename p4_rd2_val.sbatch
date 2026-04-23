@@ -27,6 +27,7 @@ echo "CPUS_PER_TASK=${SLURM_CPUS_PER_TASK}  OMP=${OMP_NUM_THREADS}"
 uv run --package council_policies --with peft python p4_benchmark_client.py \
   --dataset task-aware-llm-council/router_dataset-2 \
   --split validation \
+  --limit -1 \
   --chunk-size 100 \
   --peft-adapter artifacts/decomposer_router_causal/adapter \
   --out p4_gemma_lora_v2_rd2_val.jsonl
