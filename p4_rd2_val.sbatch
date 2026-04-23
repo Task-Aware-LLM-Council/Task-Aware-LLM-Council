@@ -8,6 +8,15 @@
 
 cd $SLURM_SUBMIT_DIR
 
+module purge
+module load apptainer
+export PATH="$HOME/.local/bin:$PATH"   # for uv
+
+which apptainer
+which uv
+nvidia-smi | head -20
+
+
 uv run --package council_policies --with peft python p4_benchmark_client.py \
   --dataset task-aware-llm-council/router_dataset-2 \
   --split validation \
