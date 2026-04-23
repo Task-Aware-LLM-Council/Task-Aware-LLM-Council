@@ -12,8 +12,10 @@
 #   port 8003 general    (Qwen2.5-14B-AWQ,         10GB weights, util 0.28)
 #   + in-process decomposer on CPU (Gemma-2-2B) — keeps GPU free for vLLM
 # Budget: 0.86 × 46GB ≈ 39.6GB vLLM, ~6.4GB headroom. Staggered 30s apart
-# to dodge concurrent memory-reservation races. max-model-len=4096; QuALITY
-# contexts >4096 tokens will truncate (revisit if scoring flags QuALITY).
+# to dodge concurrent memory-reservation races. max-model-len=2048; at 4096
+# vLLM needed ~9.6GB KV cache for gemma-2-9B alone (more than the weights!),
+# which couldn't fit. QuALITY contexts >2048 tokens will truncate; revisit
+# if scoring flags QuALITY regression.
 #
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a40:1
@@ -82,7 +84,7 @@ for i in 0 1 2; do
         --port "${PORTS[$i]}" \
         --gpu-memory-utilization "${GPU_UTIL[$i]}" \
         --quantization "${QUANT[$i]}" \
-        --max-model-len 4096 \
+        --max-model-len 2048 \
         > "p4_vllm_${PORTS[$i]}.log" 2>&1 &
     SERVER_PIDS+=($!)
     # Stagger launches so each server finishes reserving GPU memory before the
