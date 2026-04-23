@@ -27,7 +27,7 @@
 
 set -uo pipefail
 
-cd $SLURM_SUBMIT_DIR
+cd "${SLURM_SUBMIT_DIR:-$PWD}"
 
 module purge
 module load apptainer
@@ -40,12 +40,12 @@ export TOKENIZERS_PARALLELISM=true
 
 VLLM_IMAGE="${VLLM_IMAGE:-/project/robinjia_1822/Task-Aware-LLM-Council/vllm-openai_latest.sif}"
 if [[ ! -f "$VLLM_IMAGE" ]]; then
-    VLLM_IMAGE="$SLURM_SUBMIT_DIR/vllm-openai_latest.sif"
+    VLLM_IMAGE="${SLURM_SUBMIT_DIR:-$PWD}/vllm-openai_latest.sif"
 fi
 CACHE_DIR="/scratch1/$(whoami)/.cache/huggingface"
 mkdir -p "$CACHE_DIR"
 
-echo "image=$VLLM_IMAGE  cache=$CACHE_DIR  cpus=$SLURM_CPUS_PER_TASK"
+echo "image=$VLLM_IMAGE  cache=$CACHE_DIR  cpus=${SLURM_CPUS_PER_TASK:-?}"
 which apptainer && which uv
 nvidia-smi | head -25
 
