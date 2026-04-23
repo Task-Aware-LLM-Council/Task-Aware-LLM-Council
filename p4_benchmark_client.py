@@ -57,6 +57,83 @@ SYNTHESIZER_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
 
 _DECOMPOSER_CACHE_PATH = Path("artifacts/p4_decomposer_cache.jsonl")
 
+# --- Pre-launched (2-GPU co-resident) mode ---
+# Companion sbatch `p4_rd2_val_2xa100.sbatch` launches 4 vLLM servers — specs
+# on GPU 0 (ports 8001/8002/8003), synth on GPU 1 (port 8004) — before running
+# this client. With --pre-launched the orchestrator builds HTTP-mode configs
+# (Provider.LOCAL + api_base, no local_launch_image) so it never spawns its
+# own vLLM runtime; `managed_local_provider_config` sees no image and yields
+# the normalized config unchanged. Specialists and synth co-reside for the
+# whole run — no spec<->synth GPU swap, no cold-start between chunks.
+_PRE_LAUNCHED_QA_PORT = 8001
+_PRE_LAUNCHED_REASONING_PORT = 8002
+_PRE_LAUNCHED_GENERAL_PORT = 8003
+_PRE_LAUNCHED_SYNTH_PORT = 8004
+
+_PRE_LAUNCHED_QA_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
+_PRE_LAUNCHED_REASONING_MODEL = SYNTHESIZER_MODEL
+_PRE_LAUNCHED_GENERAL_MODEL = "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
+
+
+def _http_provider_config(model: str, port: int) -> ProviderConfig:
+    """Point at a pre-launched vLLM server — no local_launch_image means
+    build_vllm_runtime_config returns None and the orchestrator skips launch."""
+    return ProviderConfig(
+        provider=Provider.LOCAL,
+        api_base=f"http://127.0.0.1:{port}/v1/chat/completions",
+        default_model=model,
+        default_params={},
+        timeout_seconds=600.0,
+    )
+
+
+def build_pre_launched_specialist_config() -> OrchestratorConfig:
+    """3-specialist HTTP-mode config — roles and aliases mirror
+    build_default_local_vllm_orchestrator_config so the P4 router's predicted
+    role names still resolve."""
+    specs = (
+        ("qa", _PRE_LAUNCHED_QA_MODEL, ("qa", "qa_reasoning"),
+         "Question-answering specialist.", _PRE_LAUNCHED_QA_PORT),
+        ("reasoning", _PRE_LAUNCHED_REASONING_MODEL,
+         ("reasoning", "math", "code", "math_code"),
+         "Math and code specialist.", _PRE_LAUNCHED_REASONING_PORT),
+        ("general", _PRE_LAUNCHED_GENERAL_MODEL,
+         ("general", "fever", "fact_general"),
+         "Strong generalist and FEVER-oriented model.", _PRE_LAUNCHED_GENERAL_PORT),
+    )
+    return OrchestratorConfig(
+        models=tuple(
+            ModelSpec(
+                role=role,
+                model=model,
+                aliases=aliases,
+                description=description,
+                provider_config=_http_provider_config(model, port),
+            )
+            for role, model, aliases, description, port in specs
+        ),
+        default_role="general",
+        mode_label="local-pre-launched",
+    )
+
+
+def build_pre_launched_synthesizer_config() -> OrchestratorConfig:
+    """Synth HTTP-mode config for the pre-launched server on port 8004."""
+    return OrchestratorConfig(
+        models=(
+            ModelSpec(
+                role=SYNTHESIZER_ROLE,
+                model=SYNTHESIZER_MODEL,
+                aliases=(SYNTHESIZER_ROLE,),
+                provider_config=_http_provider_config(
+                    SYNTHESIZER_MODEL, _PRE_LAUNCHED_SYNTH_PORT,
+                ),
+            ),
+        ),
+        default_role=SYNTHESIZER_ROLE,
+        mode_label="local-pre-launched",
+    )
+
 
 class _CachingDecomposer:
     """Disk-backed cache around Seq2SeqDecomposerRouter.decompose().
@@ -282,6 +359,15 @@ def parse_args() -> argparse.Namespace:
                         "pays one spec+synth cold start (~8min) because the 44GB "
                         "A40 can't hold both simultaneously. Bigger chunk = fewer "
                         "cold starts, bigger blast radius on crash.")
+    p.add_argument("--pre-launched", action="store_true",
+                   help="Skip vLLM launch and point at pre-started servers on "
+                        "127.0.0.1:8001/8002/8003 (specs) and 8004 (synth). "
+                        "Companion sbatch owns the server lifecycle; 3 specs + "
+                        "synth co-reside across two A100s so there is no "
+                        "cold-start between chunks.")
+    p.add_argument("--decomposer-device", default=None,
+                   help="Override decomposer device (default: cpu, or cuda:1 "
+                        "when --pre-launched is set).")
     return p.parse_args()
 
 
@@ -330,14 +416,17 @@ async def main() -> int:
     args = parse_args()
 
     # Joint decomposer+router: in-process, loads first, stays resident through
-    # the full run. Pinned to CPU by default — Gemma-2-2B on GPU is ~5GB bf16,
-    # which doesn't fit next to three quantized specialists on a 44GB A40.
-    # CPU adds ~500-1500ms per decompose call, tolerated at smoke-bench scale.
-    # Flip to device="cuda" once specialists stop co-residing (or int8 Gemma).
+    # the full run. Pinned to CPU on 44GB A40 because Gemma-2-2B on GPU is
+    # ~5GB bf16 and doesn't fit next to three quantized specialists. On the
+    # 2xA100 pre-launched topology GPU 1 hosts only the synth (~22GB of 80GB),
+    # so we co-locate the decomposer there (~5GB) — saves the ~1s/call CPU tax.
+    decomposer_device = args.decomposer_device or (
+        "cuda:1" if args.pre_launched else "cpu"
+    )
     print(f"Loading joint decomposer+router from {args.model_dir} "
-          f"(adapter={args.peft_adapter or 'none'}, device=cpu)")
+          f"(adapter={args.peft_adapter or 'none'}, device={decomposer_device})")
     generate_fn = HFCausalGenerate(
-        args.model_dir, peft_adapter=args.peft_adapter, device="cpu",
+        args.model_dir, peft_adapter=args.peft_adapter, device=decomposer_device,
     )
     decomposer = Seq2SeqDecomposerRouter(
         generate_fn=generate_fn,
@@ -352,8 +441,12 @@ async def main() -> int:
         max_subtasks=args.max_subtasks,
     )
 
-    specialist_config = build_default_local_vllm_orchestrator_config()
-    synthesizer_config = build_synthesizer_config()
+    if args.pre_launched:
+        specialist_config = build_pre_launched_specialist_config()
+        synthesizer_config = build_pre_launched_synthesizer_config()
+    else:
+        specialist_config = build_default_local_vllm_orchestrator_config()
+        synthesizer_config = build_synthesizer_config()
 
     done_indices = _load_done_indices(args.out)
     if done_indices:
