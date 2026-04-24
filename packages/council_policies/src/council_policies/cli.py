@@ -15,7 +15,7 @@ from council_policies.p2.run import (
 )
 
 _PRESET_DEFAULTS = {
-    "pilot": {"max_examples": 5, "max_concurrency": 1, "batch_size": 1},
+    "pilot": {"max_examples": 300, "max_concurrency": 50, "batch_size": 300},
     "full": {"max_examples": 160, "max_concurrency": 5, "batch_size": 64},
 }
 
