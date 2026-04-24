@@ -144,7 +144,11 @@ class LearnedRouterPolicy(BasePolicyAdapter):
         # into sub-claims and the specialist ends up verifying the
         # reformulation, not the original. Set via PromptRequest.metadata.
         force_single = bool((request.metadata or {}).get("force_single_subtask"))
-        if force_single:
+        # Override the router's role choice entirely — useful when the
+        # joint decomposer+router misroutes a specific source (e.g. the
+        # router sends HumanEval code questions to qa instead of math_code).
+        forced_role_hint = (request.metadata or {}).get("force_role")
+        if force_single or forced_role_hint:
             subtasks = [Subtask(text=prompt_text, order=0)]
         else:
             subtasks = await self.decomposer.decompose(prompt_text, context=context_text)
@@ -158,7 +162,15 @@ class LearnedRouterPolicy(BasePolicyAdapter):
         decisions: list[RoutingDecision] = []
         runs: list[DispatchRun] = []
         for subtask in subtasks:
-            if self.use_joint_model:
+            if forced_role_hint:
+                decision = RoutingDecision(
+                    role=str(forced_role_hint),
+                    scores={str(forced_role_hint): 1.0},
+                    confidence=1.0,
+                    fallback_used=False,
+                    fallback_reason="force_role_metadata",
+                )
+            elif self.use_joint_model:
                 decision = self._decision_from_joint_model(subtask)
             else:
                 decision = self.router.classify(subtask.text, context=context_text)
