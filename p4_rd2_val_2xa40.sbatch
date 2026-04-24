@@ -80,6 +80,7 @@ for i in 0 1 2; do
     echo "Starting ${MODELS[$i]} on port ${PORTS[$i]} (GPU ${GPUS[$i]}, util ${GPU_UTIL[$i]})..."
     CUDA_VISIBLE_DEVICES=${GPUS[$i]} apptainer run --nv --cleanenv \
         --bind "${CACHE_DIR}:${CACHE_DIR}" \
+        --env "CUDA_VISIBLE_DEVICES=${GPUS[$i]}" \
         --env "HF_HOME=${CACHE_DIR}" \
         --env "HF_TOKEN=${HF_TOKEN:-}" \
         "$VLLM_IMAGE" \
