@@ -15,7 +15,7 @@ from council_policies.p2.run import (
 )
 
 _PRESET_DEFAULTS = {
-    "pilot": {"max_examples": 300, "max_concurrency": 50, "batch_size": 300},
+    "pilot": {"max_examples": 200, "max_concurrency": 25, "batch_size": 200},
     "full": {"max_examples": 160, "max_concurrency": 5, "batch_size": 64},
 }
 
@@ -76,7 +76,7 @@ async def run_cli_async(args: argparse.Namespace) -> int:
         output_root=Path(args.output_root),
         dataset_name=args.dataset,
         dataset_alias=args.dataset_alias,
-        split=args.split or "validation",
+        split=args.split or "test",
         max_examples=max_examples,
         batch_size=batch_size,
         max_concurrency=args.max_concurrency or preset["max_concurrency"],
