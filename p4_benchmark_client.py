@@ -326,20 +326,25 @@ def parse_args() -> argparse.Namespace:
                    help="Upstream MuSiQue dataset to pull is_supporting flags from.")
     p.add_argument("--musique-split", default="validation")
     p.add_argument(
-        "--single-subtask-sources", default="FEVER,HumanEvalPlus",
+        "--single-subtask-sources", default="FEVER,HumanEvalPlus,HARDMATH",
         help="Comma-separated source_dataset names that should bypass the "
              "decomposer and be dispatched as a single subtask containing "
              "the full original prompt. FEVER needs this because decomposed "
              "sub-claims lose the claim-as-a-whole framing; HumanEvalPlus "
-             "because the decomposer mangles function signatures. Empty "
-             "string to disable.",
+             "because the decomposer mangles function signatures; HARDMATH "
+             "because splitting a math problem into sub-questions tends to "
+             "discard the constraint that ties them together. Empty string "
+             "to disable.",
     )
     p.add_argument(
-        "--force-role-sources", default="HumanEvalPlus:math_code",
+        "--force-role-sources",
+        default="HumanEvalPlus:math_code,HARDMATH:math_code",
         help="Comma-separated SOURCE:ROLE overrides that bypass the router "
-             "entirely. HumanEvalPlus defaults to math_code (DeepSeek-R1) "
-             "because the joint router was observed sending >90% of code "
-             "rows to qa_reasoning instead. Empty string to disable.",
+             "entirely. HumanEvalPlus and HARDMATH default to math_code "
+             "(DeepSeek-R1) because the joint router was observed sending "
+             ">90% of code rows to qa_reasoning (gemma QA, not a math/code "
+             "model); HARDMATH has the same mismatch — math problems need "
+             "the reasoning specialist, not QA. Empty string to disable.",
     )
     return p.parse_args()
 
