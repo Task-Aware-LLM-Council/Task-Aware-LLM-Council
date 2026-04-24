@@ -139,13 +139,21 @@ class LearnedRouterPolicy(BasePolicyAdapter):
         prompt_text = request.user_prompt or ""
         context_text = request.context or ""
 
-        subtasks = await self.decomposer.decompose(prompt_text, context=context_text)
-        if not subtasks:
-            logger.warning(
-                "Decomposer returned no subtasks; falling back to single passthrough"
-            )
+        # Opt-out of decomposition for prompts where reformulation hurts
+        # more than it helps — e.g. FEVER's single claim gets rewritten
+        # into sub-claims and the specialist ends up verifying the
+        # reformulation, not the original. Set via PromptRequest.metadata.
+        force_single = bool((request.metadata or {}).get("force_single_subtask"))
+        if force_single:
             subtasks = [Subtask(text=prompt_text, order=0)]
-        subtasks = sorted(subtasks, key=lambda s: s.order)[: self.max_subtasks]
+        else:
+            subtasks = await self.decomposer.decompose(prompt_text, context=context_text)
+            if not subtasks:
+                logger.warning(
+                    "Decomposer returned no subtasks; falling back to single passthrough"
+                )
+                subtasks = [Subtask(text=prompt_text, order=0)]
+            subtasks = sorted(subtasks, key=lambda s: s.order)[: self.max_subtasks]
 
         decisions: list[RoutingDecision] = []
         runs: list[DispatchRun] = []
