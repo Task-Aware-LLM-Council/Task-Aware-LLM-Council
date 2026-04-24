@@ -31,12 +31,20 @@ from pathlib import Path
 # fact_general}; a canonical expected role is listed first, with looser
 # aliases as fallbacks for runs that used a different role-naming scheme.
 DEFAULT_EXPECTED_ROLES: dict[str, set[str]] = {
-    "FEVER":         {"fact_general", "qa_reasoning", "qa", "general", "fever"},
-    "HARDMATH":      {"math_code", "reasoning", "math", "code"},
-    "HumanEvalPlus": {"math_code", "reasoning", "code"},
-    "MuSiQue":       {"qa_reasoning", "qa"},
-    "QuALITY":       {"qa_reasoning", "qa"},
+    "FEVER":         {"fact_general"},
+    "HARDMATH":      {"math_code"},
+    "HumanEvalPlus": {"math_code"},
+    "MuSiQue":       {"qa_reasoning"},
+    "QuALITY":       {"qa_reasoning"},
 }
+
+# Sources where the benchmark client applied --force-role-sources bypass.
+# Rows from these sources always show predicted_route == the forced role,
+# which would inflate routing accuracy since the learned router was
+# bypassed. Exclude from the route_acc column by default.
+DEFAULT_FORCE_ROLE_SOURCES: frozenset[str] = frozenset({
+    "HARDMATH", "HumanEvalPlus",
+})
 
 
 def _route_list(row: dict) -> list[str]:
@@ -72,6 +80,12 @@ def main():
         help="Optional comma-separated SOURCE:ROLE list to override the "
              "canonical mapping (e.g. FEVER:fact_general,HARDMATH:math_code). "
              "Any role in predicted_route matching ROLE counts as correct.",
+    )
+    p.add_argument(
+        "--count-force-routed", action="store_true",
+        help="Include force-routed sources (HARDMATH, HumanEvalPlus) in the "
+             "route_acc column. Off by default because the learned router "
+             "was bypassed for those rows — counting them inflates accuracy.",
     )
     args = p.parse_args()
 
@@ -115,12 +129,13 @@ def main():
             s["pred_chars"].append(len(pred))
             s["pred_tokens"].append(_approx_tokens(pred))
 
-            route = _route_list(row)
-            if route:
-                s["routed_rows"] += 1
-                expected_set = expected.get(src, set())
-                if expected_set and any(r in expected_set for r in route):
-                    s["correct_routes"] += 1
+            if args.count_force_routed or src not in DEFAULT_FORCE_ROLE_SOURCES:
+                route = _route_list(row)
+                if route:
+                    s["routed_rows"] += 1
+                    expected_set = expected.get(src, set())
+                    if expected_set and any(r in expected_set for r in route):
+                        s["correct_routes"] += 1
 
     print(f"{'source':<16} {'n':>4} {'err':>4} "
           f"{'lat_ms':>9} {'out_chars':>10} {'out_tok~':>9} "
