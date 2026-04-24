@@ -180,6 +180,21 @@ _HARDMATH_CONSTRAINED_PROMPT = (
 )
 
 
+# HumanEvalPlus — specialist must return the full function as real Python.
+# Without this the QA-routed gemma specialist often writes prose or
+# pseudo-code explanations, breaking `extract_code_answer` or yielding
+# responses missing the required `def <entry_point>(...):` signature.
+# The diagnostic counted 22/60 NO_ENTRY_POINT + 22/60 SYNTAX_ERROR rows
+# with no template; wrapping like this should recover most.
+_HUMANEVAL_CONSTRAINED_PROMPT = (
+    "{question}\n\n"
+    "Complete the function above. Return only valid Python enclosed in a "
+    "```python ... ``` fenced code block. Do not add explanations, do not "
+    "rename the function, and do not remove the original signature or "
+    "docstring."
+)
+
+
 _MUSIQUE_ORACLE_CACHE_DIR = Path("artifacts")
 
 
@@ -310,13 +325,32 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--musique-source", default="bdsaglam/musique",
                    help="Upstream MuSiQue dataset to pull is_supporting flags from.")
     p.add_argument("--musique-split", default="validation")
+    p.add_argument(
+        "--single-subtask-sources", default="FEVER,HumanEvalPlus",
+        help="Comma-separated source_dataset names that should bypass the "
+             "decomposer and be dispatched as a single subtask containing "
+             "the full original prompt. FEVER needs this because decomposed "
+             "sub-claims lose the claim-as-a-whole framing; HumanEvalPlus "
+             "because the decomposer mangles function signatures. Empty "
+             "string to disable.",
+    )
+    p.add_argument(
+        "--force-role-sources", default="HumanEvalPlus:math_code",
+        help="Comma-separated SOURCE:ROLE overrides that bypass the router "
+             "entirely. HumanEvalPlus defaults to math_code (DeepSeek-R1) "
+             "because the joint router was observed sending >90% of code "
+             "rows to qa_reasoning instead. Empty string to disable.",
+    )
     return p.parse_args()
 
 
 def build_requests(
     dataset_name: str, split: str, limit: int, skip_indices: set[int],
     musique_oracle: dict[str, str] | None = None,
+    single_subtask_sources: frozenset[str] = frozenset(),
+    force_role_by_source: dict[str, str] | None = None,
 ) -> list[dict]:
+    force_role_by_source = force_role_by_source or {}
     ds = load_dataset(dataset_name, split=split)
     oracle_hits = 0
     oracle_misses = 0
@@ -352,6 +386,8 @@ def build_requests(
             prompt_template = _QUALITY_CONSTRAINED_PROMPT
         elif source == "HARDMATH":
             prompt_template = _HARDMATH_CONSTRAINED_PROMPT
+        elif source == "HumanEvalPlus":
+            prompt_template = _HUMANEVAL_CONSTRAINED_PROMPT
 
         rows.append({
             "index": index,
@@ -361,6 +397,8 @@ def build_requests(
             "gold_answer": row.get("gold_answer"),
             "gold_label": row.get("gold_label"),
             "prompt_template": prompt_template,
+            "force_single_subtask": source in single_subtask_sources,
+            "force_role": force_role_by_source.get(source),
         })
     return rows
 
@@ -404,9 +442,30 @@ async def main() -> int:
             args.musique_source, args.musique_split,
         )
 
+    single_subtask_sources = frozenset(
+        s.strip() for s in (args.single_subtask_sources or "").split(",") if s.strip()
+    )
+    if single_subtask_sources:
+        print(
+            f"Bypassing decomposer for sources: "
+            f"{sorted(single_subtask_sources)}"
+        )
+
+    force_role_by_source: dict[str, str] = {}
+    for entry in (args.force_role_sources or "").split(","):
+        entry = entry.strip()
+        if not entry or ":" not in entry:
+            continue
+        src, role = entry.split(":", 1)
+        force_role_by_source[src.strip()] = role.strip()
+    if force_role_by_source:
+        print(f"Router overrides: {force_role_by_source}")
+
     rows = build_requests(
         args.dataset, args.split, args.limit, done_indices,
         musique_oracle=musique_oracle,
+        single_subtask_sources=single_subtask_sources,
+        force_role_by_source=force_role_by_source,
     )
     print(f"Built {len(rows)} prompt requests from {args.dataset}:{args.split}")
     if musique_oracle is not None:
@@ -420,15 +479,21 @@ async def main() -> int:
         print("Nothing to do — all rows already completed.")
         return 0
 
+    def _request_metadata(row: dict) -> dict:
+        meta: dict = {}
+        if row["prompt_template"]:
+            meta["specialist_prompt_template"] = row["prompt_template"]
+        if row.get("force_single_subtask"):
+            meta["force_single_subtask"] = True
+        if row.get("force_role"):
+            meta["force_role"] = row["force_role"]
+        return meta
+
     requests = [
         PromptRequest(
             user_prompt=row["question"],
             context=row["context"],
-            metadata=(
-                {"specialist_prompt_template": row["prompt_template"]}
-                if row["prompt_template"]
-                else {}
-            ),
+            metadata=_request_metadata(row),
         )
         for row in rows
     ]
