@@ -338,13 +338,16 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--force-role-sources",
-        default="HumanEvalPlus:math_code,HARDMATH:math_code",
+        default="HumanEvalPlus:math_code,HARDMATH:math_code,FEVER:fact_general",
         help="Comma-separated SOURCE:ROLE overrides that bypass the router "
              "entirely. HumanEvalPlus and HARDMATH default to math_code "
              "(DeepSeek-R1) because the joint router was observed sending "
              ">90% of code rows to qa_reasoning (gemma QA, not a math/code "
              "model); HARDMATH has the same mismatch — math problems need "
-             "the reasoning specialist, not QA. Empty string to disable.",
+             "the reasoning specialist, not QA. FEVER defaults to "
+             "fact_general (Qwen-14B) because the router sent 75% of rows "
+             "to qa_reasoning (gemma-9B) when the larger generalist is "
+             "the better fit for claim verification. Empty string to disable.",
     )
     return p.parse_args()
 
