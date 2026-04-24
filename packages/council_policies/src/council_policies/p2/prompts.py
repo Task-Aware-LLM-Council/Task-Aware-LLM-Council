@@ -4,6 +4,62 @@ from __future__ import annotations
 # This hides which model produced which answer so models can't vote for themselves.
 ROLE_TO_LABEL: dict[str, str] = {"qa": "A", "reasoning": "B", "general": "C"}
 LABEL_TO_ROLE: dict[str, str] = {v: k for k, v in ROLE_TO_LABEL.items()}
+_MUSIQUE_NOT_PRESENT = "NOT PRESENT IN CONTEXT"
+
+
+def build_specialist_prompt(
+    *,
+    source_dataset: str,
+    question: str,
+    context: str | None,
+    skill_tags: list[str] | None = None,
+) -> tuple[str, str | None]:
+    """Build a dataset-aware specialist prompt that suppresses visible reasoning."""
+    skill_tags = skill_tags or []
+    normalized = (source_dataset or "").strip().lower()
+
+    if "musique" in normalized:
+        prompt = (
+            "You are a strict reading comprehension assistant.\n\n"
+            "RULES:\n"
+            "1. You must ONLY use the information provided in the Context. Do NOT use general knowledge.\n"
+            "2. You may reason internally, but do NOT reveal your reasoning, scratchpad, thinking, or analysis.\n"
+            "3. Output only the final answer.\n"
+            "4. Conclude on a new line in the exact format: Final Answer: <exact entity name>.\n"
+            f"5. If the answer is completely missing, output exactly: Final Answer: {_MUSIQUE_NOT_PRESENT}.\n\n"
+            f"Context:\n{context or ''}\n\n"
+            f"Question: {question}"
+        )
+        return prompt, None
+
+    if "fever" in normalized or "fact-verification" in skill_tags:
+        prompt = (
+            f"Claim: {question}\n\n"
+            "Based on the provided context, verify the claim. "
+            "Do not explain your reasoning. "
+            "Answer strictly with one of these three labels: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
+        )
+        return prompt, context
+
+    if "hardmath" in normalized or "math" in normalized or "math" in skill_tags:
+        prompt = (
+            question
+            + "\n\nDo not show your reasoning. Output only the final answer enclosed in \\boxed{}."
+        )
+        return prompt, context
+
+    if "humaneval" in normalized or "code" in skill_tags:
+        prompt = (
+            question
+            + "\n\nReturn only executable Python code. No explanation, no markdown fences, no commentary."
+        )
+        return prompt, context
+
+    prompt = (
+        question
+        + "\n\nDo not explain your reasoning. Answer the question concisely with just the answer."
+    )
+    return prompt, context
 
 
 def build_vote_prompt(question: str, label_to_answer: dict[str, str]) -> str:

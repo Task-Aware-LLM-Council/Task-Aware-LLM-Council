@@ -34,7 +34,7 @@ from task_eval.scoring import exact_match_multi, label_accuracy, math_exact_matc
 
 from council_policies.adapter import P2PolicyClient
 from council_policies.models import P2CouncilDecision, P2RunConfig, P2RunResult, P2ScoreRecord, P2SynthesizedRecord
-from council_policies.p2.prompts import build_synthesis_prompt
+from council_policies.p2.prompts import build_specialist_prompt, build_synthesis_prompt
 
 P2_COUNCIL_MODEL = "p2_council"
 P2_DEFAULT_DATASET = "task-aware-llm-council/router_dataset-2"
@@ -290,7 +290,7 @@ async def _run_synthesizer_batch(
             synth_request = PromptRequest(
                 user_prompt=build_synthesis_prompt(
                     source_dataset=row_metadata["source_dataset"],
-                    question=decision.request.user_prompt or "",
+                    question=str(row_metadata.get("question") or ""),
                     context=decision.request.context,
                     winning_answer=decision.winning_answer,
                     other_answers=other_answers,
@@ -837,7 +837,6 @@ def _build_synthesizer_orchestrator_config(config: P2RunConfig) -> OrchestratorC
                             "local_launch_port": config.local_launch_port + 10,
                             "local_launch_bind": DEFAULT_LOCAL_VLLM_BIND,
                             "local_launch_startup_timeout_seconds": 1800.0,
-                            "local_launch_gpu_memory_utilization": config.gpu_utilization,
                             "local_launch_quantization": "compressed-tensors",
                             "local_launch_use_gpu": True,
                         },
@@ -884,6 +883,12 @@ def _build_request_for_row(
         context = _extract_musique_oracle_context(row, context)
 
     parsed_metadata = _parse_metadata_field(row.get("metadata"))
+    specialist_prompt, specialist_context = build_specialist_prompt(
+        source_dataset=source_dataset,
+        question=question,
+        context=context,
+        skill_tags=skill_tags,
+    )
     row_metadata = {
         "source_dataset": source_dataset,
         "skill_tags": skill_tags,
@@ -895,10 +900,11 @@ def _build_request_for_row(
         "original_id": row.get("original_id"),
         "question": question,
         "context": context,
+        "specialist_prompt": specialist_prompt,
     }
     request = PromptRequest(
-        user_prompt=question,
-        context=context,
+        user_prompt=specialist_prompt,
+        context=specialist_context,
         metadata={
             "example_id": example_id,
             "dataset_name": config.dataset_alias,
