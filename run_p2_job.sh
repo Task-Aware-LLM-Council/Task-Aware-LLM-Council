@@ -44,7 +44,7 @@ done
 
 mkdir -p "$WORKDIR/logs"
 
-JOB_NAME="pilot-$(echo "${MODEL##*/}" | tr '/[:space:]' '-' | cut -c1-40)"
+JOB_NAME="p2_policy"
 
 sbatch \
   --job-name="$JOB_NAME" \
