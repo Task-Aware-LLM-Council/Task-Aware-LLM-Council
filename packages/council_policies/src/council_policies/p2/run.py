@@ -46,7 +46,7 @@ P2_API_QA_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_REASONING_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_GENERAL_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_SYNTH_MODEL = "moonshotai/kimi-k2-instruct-0905"
-P2_VLLM_SYNTH_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
+P2_VLLM_SYNTH_MODEL = "task-aware-llm-council/Qwen2.5-7B-Instruct-AWQ"
 
 P2_MANIFEST_FILENAME = "manifest.json"
 P2_AGGREGATE_SUMMARY_FILENAME = "suite_metrics.json"
