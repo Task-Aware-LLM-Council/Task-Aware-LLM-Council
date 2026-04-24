@@ -38,6 +38,9 @@ def load_humaneval(n: int = 40, seed: int = 42) -> list[dict]:
             hallucination_subset=False,
             split="",
             original_id=task_id,
+            metadata={
+                "entry_point" : str(ex.get("entry_point", ""))
+            }
         )
         records.append(rec.to_dict())
 

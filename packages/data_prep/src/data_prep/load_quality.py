@@ -47,14 +47,14 @@ def load_quality(n: int = 30, seed: int = 42) -> list[dict]:
         else:
             context = to_text(summary)
 
-        answers = ex.get("answers", [])
-        if answers:
-            if isinstance(answers[0], dict):
-                gold_answer = to_text(answers[0].get("text", ""))
-            else:
-                gold_answer = to_text(answers[0])
-        else:
-            gold_answer = ""
+        gold_answer = str(ex.get("answers", []))
+        # if answers:
+        #     if isinstance(answers[0], dict):
+        #         gold_answer = to_text(answers[0].get("text", ""))
+        #     else:
+        #         gold_answer = to_text(answers[0])
+        # else:
+        #     gold_answer = ""
 
         rec = RouterExample(
             id=make_id("QuALITY", doc.get("id", random.randint(0, 999999))),

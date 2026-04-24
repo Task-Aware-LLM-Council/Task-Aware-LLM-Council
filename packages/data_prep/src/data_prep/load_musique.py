@@ -31,28 +31,53 @@ def load_musique(n: int = 40, seed: int = 42) -> list[dict]:
         # Sever the network connection the moment we hit our target (n)
         if len(sampled) >= n:
             break
+    
+
+    # Keep only 10% unanswerable rows
+    unanswerable_cap = max(1, int(round(n * 0.1)))
+    answerable_cap = n - unanswerable_cap
+
+    answerable_count = 0
+    unanswerable_count = 0
+    sampled = []
+
+    for ex in ds:
+        question = ex.get("question", "")
+        if len(question) <= MIN_QUESTION_LENGTH:
+            continue
+
+        is_answerable = bool(ex.get("answerable", False))
+
+        if is_answerable and answerable_count < answerable_cap:
+            sampled.append(ex)
+            answerable_count += 1
+        elif not is_answerable and unanswerable_count < unanswerable_cap:
+            sampled.append(ex)
+            unanswerable_count += 1
+
+        if len(sampled) >= n:
+            break
 
     # Format into Router schema
     records = []
     for ex in sampled:
-        paragraphs = ex.get("paragraphs", [])
-
-        if isinstance(paragraphs, list) and paragraphs:
-            if isinstance(paragraphs[0], dict):
-                context = "\n\n".join(
-                    p.get("paragraph_text", p.get("text", to_text(p)))
-                    for p in paragraphs
-                )
-            else:
-                context = "\n\n".join(to_text(p) for p in paragraphs)
-        else:
-            context = ""
+        context = ex.get("paragraphs", dict())
+        # if isinstance(paragraphs, list) and paragraphs:
+        #     if isinstance(paragraphs[0], dict):
+        #         context = "\n\n".join(
+        #             p.get("paragraph_text", p.get("text", to_text(p)))
+        #             for p in paragraphs
+        #         )
+        #     else:
+        #         context = "\n\n".join(to_text(p) for p in paragraphs)
+        # else:
+        #     context = ""
 
         rec = RouterExample(
             id=make_id("MuSiQue", ex.get("id", random.randint(0, 999999))),
             source_dataset="MuSiQue",
             question=to_text(ex.get("question", "")),
-            context=context,
+            context=str(context),
             gold_answer=to_text(ex.get("answer", "")),
             gold_label="",
             unit_tests="",
@@ -60,6 +85,7 @@ def load_musique(n: int = 40, seed: int = 42) -> list[dict]:
             hallucination_subset=False,
             split="",
             original_id=to_text(ex.get("id", "")),
+            metadata= {"answerable" : ex.get("answerable", False)}
         )
         records.append(rec.to_dict())
 

@@ -14,11 +14,11 @@ random.seed(42)
 def main():
     all_records = []
     loaders = [
-        (load_musique, 40),
-        (load_quality, 30),
-        (load_fever, 40),
-        (load_hardmath, 40),
-        (load_humaneval, 40),
+        (load_musique, 100),
+        (load_quality, 100),
+        (load_fever, 100),
+        (load_hardmath, 100),
+        (load_humaneval, 100),
     ]
 
     for loader_fn, count in loaders:
