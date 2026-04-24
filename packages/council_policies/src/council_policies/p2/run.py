@@ -10,7 +10,6 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 import ast
-import time
 
 from datasets import load_dataset
 from llm_gateway import PromptRequest, Provider, ProviderConfig
@@ -232,7 +231,6 @@ async def _run_specialist_batch(
     *,
     start_index: int = 0,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    time.sleep(4)
     print("config.max_concurrency:", config.max_concurrency)
     sem = asyncio.Semaphore(config.max_concurrency)
     specialist_records: list[dict[str, Any]] = []
@@ -274,7 +272,6 @@ async def _run_synthesizer_batch(
     config: P2RunConfig,
     decision_payloads: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    time.sleep(4)
     print("config.max_concurrency:", config.max_concurrency)
     if not decision_payloads:
         return []
