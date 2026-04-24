@@ -208,7 +208,6 @@ source = { editable = "packages/benchmark_runner" }
 dependencies = [
     { name = "benchmarking-pipeline" },
     { name = "common" },
-    { name = "council-policies" },
     { name = "datasets" },
     { name = "llm-gateway" },
     { name = "model-orchestration" },
@@ -225,7 +224,6 @@ test = [
 requires-dist = [
     { name = "benchmarking-pipeline", editable = "packages/benchmarking_pipeline" },
     { name = "common", editable = "packages/common" },
-    { name = "council-policies", editable = "packages/council_policies" },
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "llm-gateway", editable = "packages/llm_gateway" },
     { name = "model-orchestration", editable = "packages/model-orchestration" },
@@ -374,6 +372,8 @@ version = "0.1.1"
 source = { editable = "packages/council_policies" }
 dependencies = [
     { name = "benchmarking-pipeline" },
+    { name = "common" },
+    { name = "datasets" },
     { name = "llm-gateway" },
     { name = "model-orchestration" },
     { name = "task-eval" },
@@ -385,7 +385,6 @@ p4-training = [
     { name = "torch" },
 ]
 test = [
-    { name = "datasets" },
     { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -394,7 +393,8 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "benchmarking-pipeline", editable = "packages/benchmarking_pipeline" },
-    { name = "datasets", marker = "extra == 'test'", specifier = ">=2.19" },
+    { name = "common", editable = "packages/common" },
+    { name = "datasets", specifier = ">=2.19" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "llm-gateway", editable = "packages/llm_gateway" },
     { name = "model-orchestration", editable = "packages/model-orchestration" },

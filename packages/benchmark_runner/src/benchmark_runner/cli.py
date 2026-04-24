@@ -109,7 +109,7 @@ async def run_cli_async(args: argparse.Namespace) -> int:
         new_params = dict(spec.provider_config.default_params)
         if provider == "vllm":
             provider = Provider.LOCAL
-            new_params[LOCAL_LAUNCH_IMAGE] = "/scratch1/sureshag/Task-Aware-LLM-Council/vllm-openai_latest.sif"
+            new_params[LOCAL_LAUNCH_IMAGE] = f"/scratch1/{get_current_user()}/Task-Aware-LLM-Council/vllm-openai_latest.sif"
             new_params[LOCAL_LAUNCH_BIND] = f"/scratch1/{get_current_user()}/.cache"
             new_params[LOCAL_LAUNCH_STARTUP_TIMEOUT] = 1200
 

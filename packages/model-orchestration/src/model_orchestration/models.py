@@ -6,6 +6,7 @@ from typing import Any
 
 from llm_gateway import PromptRequest, PromptResponse, ProviderConfig
 
+from common import get_current_user
 
 ModelRole = str
 
@@ -18,7 +19,7 @@ class JSONLRecordingConfig:
 @dataclass(slots=True, frozen=True)
 class LocalVLLMPresetConfig:
     base_port: int = 8000
-    image: str = "/scratch1/sureshag/Task-Aware-LLM-Council/vllm-openai_latest.sif"
+    image: str = f"/scratch1/{get_current_user()}/Task-Aware-LLM-Council/vllm-openai_latest.sif"
     bind: str | None = None
     startup_timeout_seconds: float = 1800.0
     max_model_len: str = "8192"
