@@ -46,7 +46,7 @@ P2_API_QA_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_REASONING_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_GENERAL_MODEL = "moonshotai/kimi-k2-instruct-0905"
 P2_API_SYNTH_MODEL = "moonshotai/kimi-k2-instruct-0905"
-P2_VLLM_SYNTH_MODEL = "task-aware-llm-council/Qwen2.5-7B-Instruct-AWQ"
+P2_VLLM_SYNTH_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
 
 P2_MANIFEST_FILENAME = "manifest.json"
 P2_AGGREGATE_SUMMARY_FILENAME = "suite_metrics.json"
@@ -694,11 +694,11 @@ def _score_prediction(
     # --- THE FIX: Strip out all reasoning/chain-of-thought blocks ---
     clean_text = synthesized_text
     
-    # Handle DeepSeek/Qwen Reasoning tags
+    # Handle Reasoning tags
     if "</think>" in clean_text:
         clean_text = clean_text.split("</think>")[-1]
     
-    # Handle the custom MuSiQue scratchpad tags from your prompts.py
+    # Handle the custom MuSiQue scratchpad tags
     if "</scratchpad>" in clean_text:
         clean_text = clean_text.split("</scratchpad>")[-1]
         

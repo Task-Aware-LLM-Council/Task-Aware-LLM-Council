@@ -73,38 +73,71 @@ def build_synthesis_prompt(
     winning_answer: str,
     other_answers: list[str],
 ) -> str:
-    """Ask the synthesizer to normalize the voted answer for the source dataset."""
+    """Ask the synthesizer to perfectly format the winning answer based on the dataset."""
+    normalized = (source_dataset or "").strip().lower()
     others = "\n\n".join(f"- {a}" for a in other_answers)
     context_block = f"Context:\n{context}\n\n" if context else ""
-    dataset_rules = _dataset_format_rules(source_dataset)
+
+    if "musique" in normalized:
+        return (
+            "You are a strict output formatter. Your job is to extract the final answer from the primary response.\n\n"
+            "STRICT RULES:\n"
+            "1. Output the answer on a new line in the exact format: Final Answer: <answer>\n"
+            "2. If the primary answer concludes the information is missing, output exactly: Final Answer: NOT PRESENT IN CONTEXT\n"
+            "3. You must DISCARD all reasoning, steps, and explanations.\n\n"
+            f"Question: {question}\n\n"
+            f"{context_block}"
+            f"Primary answer (voted best):\n{winning_answer}\n\n"
+            f"Other candidate answers:\n{others}\n\n"
+            "Normalized final answer:"
+        )
+
+    if "fever" in normalized:
+        return (
+            "You are a strict output formatter. Your job is to extract the final label from the primary response.\n\n"
+            "STRICT RULES:\n"
+            "1. Output exactly one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO.\n"
+            "2. Do NOT include any explanations, reasoning, or introductory text.\n\n"
+            f"Claim: {question}\n\n"
+            f"{context_block}"
+            f"Primary answer (voted best):\n{winning_answer}\n\n"
+            f"Other candidate answers:\n{others}\n\n"
+            "Normalized final answer:"
+        )
+
+    if "hardmath" in normalized or "math" in normalized:
+        return (
+            "You are a strict output formatter. Your job is to extract the final mathematical answer from the primary response.\n\n"
+            "STRICT RULES:\n"
+            "1. Output ONLY the final answer enclosed in \\boxed{}.\n"
+            "2. Do NOT output the step-by-step derivation, prose, or commentary.\n\n"
+            f"Question: {question}\n\n"
+            f"Primary answer (voted best):\n{winning_answer}\n\n"
+            f"Other candidate answers:\n{others}\n\n"
+            "Normalized final answer:"
+        )
+
+    if "humaneval" in normalized or "code" in normalized:
+        return (
+            "You are a strict output formatter. Your job is to extract the final executable code from the primary response.\n\n"
+            "STRICT RULES:\n"
+            "1. Output ONLY executable Python code.\n"
+            "2. Do NOT include any explanations, prose, or introductory text (e.g. discard 'Here is the code:').\n\n"
+            f"Question:\n{question}\n\n"
+            f"Primary answer (voted best):\n{winning_answer}\n\n"
+            f"Other candidate answers:\n{others}\n\n"
+            "Normalized final answer:\n"
+        )
+
+    # Fallback for Quality / general QA
     return (
-        "You are the council synthesizer. Your job is to standardize the voted answer so it matches the exact scoring format for the source dataset.\n\n"
+        "You are a strict output formatter. Your job is to extract the final concise answer from the primary response.\n\n"
         "STRICT RULES:\n"
-        "1. Output ONLY the final normalized answer.\n"
-        "2. No explanation, no analysis, no bullet points, no commentary.\n"
-        "3. Start from the PRIMARY answer, but fix formatting or incorporate correct details from the other answers if needed.\n"
-        "4. Follow the dataset-specific output contract exactly.\n\n"
-        f"Source dataset: {source_dataset}\n"
-        f"Dataset-specific output contract:\n{dataset_rules}\n\n"
+        "1. Output ONLY a concise direct answer with no explanation.\n"
+        "2. DISCARD all reasoning and commentary.\n\n"
         f"Question: {question}\n\n"
         f"{context_block}"
         f"Primary answer (voted best):\n{winning_answer}\n\n"
         f"Other candidate answers:\n{others}\n\n"
         "Normalized final answer:"
     )
-
-
-def _dataset_format_rules(source_dataset: str) -> str:
-    normalized = (source_dataset or "").strip().lower()
-    if "musique" in normalized:
-        return (
-            "Output the answer on a new line in the exact format: Final Answer: <answer>\n"
-            "If the answer is missing from context, output exactly: Final Answer: NOT PRESENT IN CONTEXT"
-        )
-    if "fever" in normalized:
-        return "Output exactly one label: SUPPORTS, REFUTES, or NOT ENOUGH INFO"
-    if "hardmath" in normalized or "math" in normalized:
-        return "Output only the final answer enclosed in \\boxed{}"
-    if "humaneval" in normalized or "code" in normalized:
-        return "Output only executable Python code. No prose, no markdown fences."
-    return "Output only a concise direct answer with no explanation."
