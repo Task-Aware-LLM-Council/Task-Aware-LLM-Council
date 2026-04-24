@@ -60,14 +60,69 @@ _ABSTAIN_SENTINELS = frozenset({
     "I DON'T KNOW",
 })
 
+# Hedge phrases that a well-behaved model might emit when context is
+# insufficient but doesn't use the exact sentinel. Only checked on the
+# extracted final answer (not the reasoning) to avoid crediting rows
+# where the model hedged mid-reasoning but ultimately hallucinated an
+# answer. Case-insensitive substring match.
+_ABSTAIN_HEDGES = (
+    "not mentioned",
+    "not specified",
+    "not provided",
+    "not stated",
+    "not given",
+    "not available",
+    "not explicitly",
+    "no information",
+    "no mention",
+    "cannot be determined",
+    "cannot determine",
+    "cannot find",
+    "insufficient information",
+    "doesn't mention",
+    "does not mention",
+    "doesn't specify",
+    "does not specify",
+    "context doesn't",
+    "context does not",
+    "isn't present",
+    "is not present",
+    "isn't mentioned",
+    "is not mentioned",
+    "isn't specified",
+    "is not specified",
+)
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove leading/trailing markdown emphasis markers (**, *, __, _)
+    that models often wrap short labels in (e.g. '**Answer:** REFUTES'
+    → captured answer is '** REFUTES', which breaks whole-word matchers)."""
+    s = (text or "").strip()
+    # Strip leading * or _ runs
+    while s and s[0] in "*_":
+        s = s[1:]
+    while s and s[-1] in "*_":
+        s = s[:-1]
+    return s.strip()
+
 
 def _is_abstention(text: str) -> bool:
-    """Case-insensitive abstention sentinel match on stripped text."""
-    return (text or "").strip().rstrip(".").upper() in _ABSTAIN_SENTINELS
+    """Case-insensitive abstention match — canonical sentinel OR hedge
+    phrase appearing in the final answer."""
+    cleaned = (text or "").strip().rstrip(".").upper()
+    if cleaned in _ABSTAIN_SENTINELS:
+        return True
+    lower = (text or "").lower()
+    return any(h in lower for h in _ABSTAIN_HEDGES)
 
 
 def _extract_answer(response: str, source: str) -> str:
-    """P3-style priority extraction. Preserves NOT_FOUND sentinel."""
+    """P3-style priority extraction. Preserves NOT_FOUND sentinel.
+
+    Markdown emphasis markers (**, *) are stripped from the extracted
+    answer — without this, '**Answer:** REFUTES' captures '** REFUTES'
+    and whole-word label matchers miss it."""
     response = (response or "").strip()
     if not response:
         return ""
@@ -76,13 +131,13 @@ def _extract_answer(response: str, source: str) -> str:
 
     matches = _FINAL_ANSWER_RE.findall(response)
     if matches:
-        return matches[-1].strip().rstrip(".")
+        return _strip_markdown(matches[-1].strip().rstrip("."))
 
     if source in _LAST_LINE_SOURCES:
         for line in reversed(response.splitlines()):
             stripped = line.strip()
             if stripped:
-                return stripped.rstrip(".")
+                return _strip_markdown(stripped.rstrip("."))
 
     return response
 
