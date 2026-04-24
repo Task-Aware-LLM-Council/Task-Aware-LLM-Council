@@ -180,16 +180,32 @@ _HARDMATH_CONSTRAINED_PROMPT = (
 )
 
 
-_MUSIQUE_ORACLE_CACHE = Path("artifacts/musique_oracle_map.json")
+_MUSIQUE_ORACLE_CACHE_DIR = Path("artifacts")
 
 
-def _build_musique_oracle_map() -> dict[str, str]:
-    if _MUSIQUE_ORACLE_CACHE.exists():
-        print(f"Using cached Musique oracle map at {_MUSIQUE_ORACLE_CACHE}")
-        return json.loads(_MUSIQUE_ORACLE_CACHE.read_text(encoding="utf-8"))
+def _musique_oracle_cache_path(source: str, split: str) -> Path:
+    slug = f"{source}_{split}".replace("/", "__")
+    return _MUSIQUE_ORACLE_CACHE_DIR / f"musique_oracle_map_{slug}.json"
 
-    print("Building Musique oracle map from bdsaglam/musique:validation ...")
-    src = load_dataset("bdsaglam/musique", split="validation")
+
+def _build_musique_oracle_map(
+    source: str = "bdsaglam/musique",
+    split: str = "validation",
+) -> dict[str, str]:
+    """Build an {original_id -> oracle context} map from the upstream
+    MuSiQue dataset. Oracle context = concatenation of paragraphs
+    flagged `is_supporting=True`. Router_dataset strips this flag so we
+    rebuild it here from the source.
+
+    Falls back to first 4 paragraphs when no is_supporting flag exists
+    (defensive against MuSiQue schema drift)."""
+    cache_path = _musique_oracle_cache_path(source, split)
+    if cache_path.exists():
+        print(f"Using cached MuSiQue oracle map at {cache_path}")
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+
+    print(f"Building MuSiQue oracle map from {source}:{split} ...")
+    src = load_dataset(source, split=split)
     mapping: dict[str, str] = {}
     for row in src:
         paragraphs = row.get("paragraphs") or []
@@ -208,9 +224,9 @@ def _build_musique_oracle_map() -> dict[str, str]:
             p.strip() for p in supporting if p and p.strip()
         )
 
-    _MUSIQUE_ORACLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    _MUSIQUE_ORACLE_CACHE.write_text(json.dumps(mapping), encoding="utf-8")
-    print(f"Cached {len(mapping)} rows to {_MUSIQUE_ORACLE_CACHE}")
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(mapping), encoding="utf-8")
+    print(f"Cached {len(mapping)} rows to {cache_path}")
     return mapping
 
 
@@ -282,14 +298,28 @@ def parse_args() -> argparse.Namespace:
                         "pays one spec+synth cold start (~8min) because the 44GB "
                         "A40 can't hold both simultaneously. Bigger chunk = fewer "
                         "cold starts, bigger blast radius on crash.")
+    p.add_argument("--musique-oracle", dest="musique_oracle",
+                   action="store_true", default=True,
+                   help="Inject is_supporting-filtered oracle context from "
+                        "bdsaglam/musique for MuSiQue rows (default). Without "
+                        "oracle, the specialist sees router_dataset's full "
+                        "distractor-packed context.")
+    p.add_argument("--no-musique-oracle", dest="musique_oracle",
+                   action="store_false",
+                   help="Disable oracle injection (design B, distractor-full).")
+    p.add_argument("--musique-source", default="bdsaglam/musique",
+                   help="Upstream MuSiQue dataset to pull is_supporting flags from.")
+    p.add_argument("--musique-split", default="validation")
     return p.parse_args()
 
 
 def build_requests(
     dataset_name: str, split: str, limit: int, skip_indices: set[int],
+    musique_oracle: dict[str, str] | None = None,
 ) -> list[dict]:
     ds = load_dataset(dataset_name, split=split)
-    musique_oracle: dict[str, str] | None = None
+    oracle_hits = 0
+    oracle_misses = 0
 
     rows: list[dict] = []
     for index, row in enumerate(ds):
@@ -303,9 +333,18 @@ def build_requests(
 
         prompt_template: str | None = None
         if source == "MuSiQue":
-            # Use router_dataset's context as-is (distractor-full). The CoT
-            # wrapper tells the specialist to search carefully; no is_supporting
-            # oracle injection from the upstream bdsaglam/musique source.
+            # Oracle context: lookup by original_id in the bdsaglam/musique
+            # is_supporting-filtered map. Without oracle, router_dataset's
+            # default context is distractor-full — the specialist must search
+            # carefully via the CoT template.
+            if musique_oracle is not None:
+                original_id = row.get("original_id")
+                oracle_ctx = musique_oracle.get(str(original_id)) if original_id else None
+                if oracle_ctx:
+                    context = oracle_ctx
+                    oracle_hits += 1
+                else:
+                    oracle_misses += 1
             prompt_template = _MUSIQUE_CONSTRAINED_PROMPT
         elif source == "FEVER":
             prompt_template = _FEVER_CONSTRAINED_PROMPT
@@ -358,8 +397,25 @@ async def main() -> int:
     done_indices = _load_done_indices(args.out)
     if done_indices:
         print(f"Resuming: {len(done_indices)} rows already in {args.out}, skipping.")
-    rows = build_requests(args.dataset, args.split, args.limit, done_indices)
+
+    musique_oracle: dict[str, str] | None = None
+    if args.musique_oracle:
+        musique_oracle = _build_musique_oracle_map(
+            args.musique_source, args.musique_split,
+        )
+
+    rows = build_requests(
+        args.dataset, args.split, args.limit, done_indices,
+        musique_oracle=musique_oracle,
+    )
     print(f"Built {len(rows)} prompt requests from {args.dataset}:{args.split}")
+    if musique_oracle is not None:
+        musique_rows = sum(1 for r in rows if r.get("source_dataset") == "MuSiQue")
+        print(
+            f"MuSiQue oracle context injected "
+            f"(map size: {len(musique_oracle)}, "
+            f"MuSiQue rows in batch: {musique_rows})"
+        )
     if not rows:
         print("Nothing to do — all rows already completed.")
         return 0
