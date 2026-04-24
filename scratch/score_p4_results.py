@@ -39,7 +39,27 @@ _FINAL_ANSWER_RE = re.compile(
     r"(?:final answer|the answer is|answer)\s*[:\-]\s*(.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
-_LAST_LINE_SOURCES = {"MuSiQue", "QuALITY", "FEVER"}
+# FEVER removed from this set — its output depends on the specialist's
+# style (gemma: verdict-last, Qwen: verdict-first) and neither maps cleanly
+# to the last-non-empty-line heuristic. FEVER now uses a dedicated scan
+# over the full response; see _fever_extract below.
+_LAST_LINE_SOURCES = {"MuSiQue", "QuALITY"}
+
+_FEVER_LABEL_RE = re.compile(
+    r"\b(SUPPORTS|REFUTES|NOT ENOUGH INFO)\b",
+    re.IGNORECASE,
+)
+
+
+def _fever_extract(response: str) -> str:
+    """Scan the full response for a whole-word FEVER label (case-insensitive)
+    and return the first match, uppercased. This is deliberately permissive
+    — Qwen-14B puts the verdict on line 1 then explains; gemma-9B does the
+    opposite. Picking the first label matches both styles (the specialist's
+    initial commit is typically the verdict, and the explanation that
+    follows rarely mentions alternative labels except to deny them)."""
+    m = _FEVER_LABEL_RE.search(response or "")
+    return m.group(1).upper() if m else ""
 
 _ORIGINAL_ID_KEYS = ("original_id", "id", "musique_id")
 _ANSWERABLE_KEYS = ("answerable", "is_answerable")
@@ -300,6 +320,12 @@ def main():
 
             if source == "HARDMATH":
                 pred = extract_math_answer(pred_raw)
+            elif source == "FEVER":
+                # Whole-response label scan — robust across specialist styles
+                # (Qwen-14B emits the verdict first then prose, gemma-9B
+                # puts it last). Fallback to generic extraction if no label
+                # token appears at all (rare but possible for long CoT).
+                pred = _fever_extract(pred_raw) or _extract_answer(pred_raw, source)
             else:
                 pred = _extract_answer(pred_raw, source)
 
