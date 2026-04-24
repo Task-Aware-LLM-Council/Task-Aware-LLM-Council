@@ -43,7 +43,7 @@ DEFAULT_EXPECTED_ROLES: dict[str, set[str]] = {
 # which would inflate routing accuracy since the learned router was
 # bypassed. Exclude from the route_acc column by default.
 DEFAULT_FORCE_ROLE_SOURCES: frozenset[str] = frozenset({
-    "HARDMATH", "HumanEvalPlus", "FEVER",
+    "HARDMATH", "HumanEvalPlus",
 })
 
 
