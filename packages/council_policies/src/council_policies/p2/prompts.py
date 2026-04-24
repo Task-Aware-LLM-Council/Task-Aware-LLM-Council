@@ -14,21 +14,21 @@ def build_specialist_prompt(
     context: str | None,
     skill_tags: list[str] | None = None,
 ) -> tuple[str, str | None]:
-    """Build a dataset-aware specialist prompt that suppresses visible reasoning."""
+    """Build the specialist prompt using the same dataset prompt shapes as task_eval profiles."""
     skill_tags = skill_tags or []
     normalized = (source_dataset or "").strip().lower()
 
     if "musique" in normalized:
         prompt = (
-            "You are a strict reading comprehension assistant.\n\n"
+            "You are a strict reading comprehension assistant. You must analyze the context and think step-by-step out loud before answering.\n\n"
             "RULES:\n"
             "1. You must ONLY use the information provided in the Context. Do NOT use general knowledge.\n"
-            "2. You may reason internally, but do NOT reveal your reasoning, scratchpad, thinking, or analysis.\n"
-            "3. Output only the final answer.\n"
-            "4. Conclude on a new line in the exact format: Final Answer: <exact entity name>.\n"
-            f"5. If the answer is completely missing, output exactly: Final Answer: {_MUSIQUE_NOT_PRESENT}.\n\n"
+            "2. The answer is ALWAYS hidden somewhere in the text. You must search carefully.\n\n"
             f"Context:\n{context or ''}\n\n"
-            f"Question: {question}"
+            f"Question: {question}\n\n"
+            "Write your step-by-step reasoning inside <scratchpad> tags. "
+            "After you are done thinking, conclude your response on a new line with the exact format: 'Final Answer: <exact entity name>'. "
+            f"If the answer is completely missing, output 'Final Answer: {_MUSIQUE_NOT_PRESENT}'."
         )
         return prompt, None
 
@@ -36,29 +36,18 @@ def build_specialist_prompt(
         prompt = (
             f"Claim: {question}\n\n"
             "Based on the provided context, verify the claim. "
-            "Do not explain your reasoning. "
             "Answer strictly with one of these three labels: SUPPORTS, REFUTES, or NOT ENOUGH INFO."
         )
         return prompt, context
 
     if "hardmath" in normalized or "math" in normalized or "math" in skill_tags:
-        prompt = (
-            question
-            + "\n\nDo not show your reasoning. Output only the final answer enclosed in \\boxed{}."
-        )
+        prompt = question + "\n\nPlease put your final answer enclosed in \\boxed{}."
         return prompt, context
 
     if "humaneval" in normalized or "code" in skill_tags:
-        prompt = (
-            question
-            + "\n\nReturn only executable Python code. No explanation, no markdown fences, no commentary."
-        )
-        return prompt, context
+        return question, context
 
-    prompt = (
-        question
-        + "\n\nDo not explain your reasoning. Answer the question concisely with just the answer."
-    )
+    prompt = question + "\n\nAnswer the question concisely with just the answer."
     return prompt, context
 
 
