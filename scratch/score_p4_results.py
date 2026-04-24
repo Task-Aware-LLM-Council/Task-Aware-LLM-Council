@@ -87,10 +87,33 @@ def _extract_answer(response: str, source: str) -> str:
 
 
 def _gold_as_list(gold):
+    """Normalize a gold_answer field to list[str].
+
+    Supports three shapes seen across the benchmark datasets:
+      - str: wrap in a list.
+      - list[str]: pass through.
+      - list[dict]: QuALITY on router_dataset-2 stores each reference as
+        {"text": "...", "tokens": [...]}. Pull out the text field; without
+        this, scoring compares predictions to the dict's Python repr and
+        reports EM=0 even on perfect matches.
+    """
     if gold is None:
         return []
     if isinstance(gold, list):
-        return [str(g) for g in gold if g]
+        items: list[str] = []
+        for g in gold:
+            if not g:
+                continue
+            if isinstance(g, dict):
+                text = g.get("text")
+                if text:
+                    items.append(str(text))
+            else:
+                items.append(str(g))
+        return items
+    if isinstance(gold, dict):
+        text = gold.get("text")
+        return [str(text)] if text else []
     return [str(gold)]
 
 
