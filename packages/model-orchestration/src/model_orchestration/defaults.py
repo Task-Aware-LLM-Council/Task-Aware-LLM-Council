@@ -54,8 +54,6 @@ def build_default_orchestrator_config(
     general_model: str = API_DEFAULT_GENERAL_MODEL,
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
-    timeout_seconds: float = 900.0,
-    max_retries: int = 3,
 ) -> OrchestratorConfig:
     normalized_provider = provider.value if isinstance(provider, Provider) else str(provider).strip().lower()
     if normalized_provider == Provider.LOCAL.value and api_base is None:
@@ -83,8 +81,6 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=qa_model,
                     provider_defaults=provider_defaults,
-                    timeout_seconds=timeout_seconds,
-                    max_retries=max_retries,
                 ),
             ),
             ModelSpec(
@@ -98,8 +94,6 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=reasoning_model,
                     provider_defaults=provider_defaults,
-                    timeout_seconds=timeout_seconds,
-                    max_retries=max_retries,
                 ),
             ),
             ModelSpec(
@@ -113,8 +107,6 @@ def build_default_orchestrator_config(
                     api_key_env=api_key_env,
                     model=general_model,
                     provider_defaults=provider_defaults,
-                    timeout_seconds=timeout_seconds,
-                    max_retries=max_retries,
                 ),
             ),
         ),
@@ -132,7 +124,6 @@ def build_default_local_vllm_orchestrator_config(
     recording: JSONLRecordingConfig | None = None,
     mode_label: str | None = None,
     preset: LocalVLLMPresetConfig | None = None,
-    sequential_local_gpu: bool = False,
 ) -> OrchestratorConfig:
     active_preset = preset or LocalVLLMPresetConfig(bind=DEFAULT_LOCAL_VLLM_BIND)
     if active_preset.bind is None:
@@ -178,7 +169,7 @@ def build_default_local_vllm_orchestrator_config(
                     default_params=_local_vllm_params(
                         active_preset,
                         role=role,
-                        port=active_preset.base_port + (0 if sequential_local_gpu else offset),
+                        port=active_preset.base_port + offset,
                     ),
                 ),
             )
@@ -187,7 +178,6 @@ def build_default_local_vllm_orchestrator_config(
         default_role="general",
         recording=recording,
         mode_label=mode_label or "local",
-        sequential_local_gpu=sequential_local_gpu,
     )
 
 
@@ -198,8 +188,6 @@ def _provider_config(
     api_key_env: str | None,
     model: str,
     provider_defaults: dict[str, object],
-    timeout_seconds: float = 900.0,
-    max_retries: int = 3,
 ) -> ProviderConfig:
     return ProviderConfig(
         provider=provider,
@@ -207,8 +195,6 @@ def _provider_config(
         api_key_env=api_key_env,
         default_model=model,
         default_params=dict(provider_defaults),
-        timeout_seconds=timeout_seconds,
-        max_retries=max_retries,
     )
 
 

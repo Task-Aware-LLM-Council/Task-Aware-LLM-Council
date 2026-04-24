@@ -13,14 +13,18 @@ dependencies = [
 	"task-eval",
 	"model-orchestration",
 	"benchmarking-pipeline",
+    "datasets>=2.19",
+    "common",
 ]
+
+[project.scripts]
+council-policies = "council_policies:main"
 
 [project.optional-dependencies]
 test = [
 	"pytest>=8.3",
 	"pytest-asyncio>=0.24", 
 	"httpx>=0.27",
-"datasets>=2.19",
 ]
 p4-training = [
     "torch>=2.2",
@@ -36,6 +40,7 @@ llm-gateway = {workspace = true}
 task-eval = {workspace = true}
 benchmarking-pipeline = {workspace = true}
 model-orchestration = {workspace = true}
+common = {workspace = true}
 
 [build-system]
 requires = ["uv_build>=0.9.1,<0.10.0"]

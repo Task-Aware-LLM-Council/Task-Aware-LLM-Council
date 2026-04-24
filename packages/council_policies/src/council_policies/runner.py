@@ -31,14 +31,14 @@ class CouncilBenchmarkRunner:
     format as P1 so scoring and comparison work unchanged.
 
     Usage in benchmark_runner CLI:
-        runner = CouncilBenchmarkRunner(specialist_config, synthesizer_config)
+        runner = CouncilBenchmarkRunner(specialist_config)
         await run_registered_benchmark_suite(datasets, spec, pipeline_runner=runner)
     """
 
     def __init__(
         self,
         specialist_config: OrchestratorConfig,
-        synthesizer_config: OrchestratorConfig,
+        synthesizer_config: OrchestratorConfig | None = None,
         max_concurrency: int = 10,
     ) -> None:
         self._runtime = PolicyRuntime(specialist_config, synthesizer_config, max_concurrency)

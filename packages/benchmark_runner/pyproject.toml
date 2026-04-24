@@ -13,7 +13,6 @@ dependencies = [
     "task-eval",
     "datasets>=4.0.0",
     "common",
-    "council-policies",
     "model-orchestration",
 ]
 
@@ -34,7 +33,6 @@ benchmarking-pipeline = { workspace = true }
 llm-gateway = { workspace = true }
 task-eval = { workspace = true }
 common = { workspace = true }
-council-policies = { workspace = true }
 model-orchestration = { workspace = true }
 
 [build-system]
