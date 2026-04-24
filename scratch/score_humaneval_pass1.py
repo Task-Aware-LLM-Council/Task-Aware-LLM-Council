@@ -44,7 +44,13 @@ def run_pass_at_1(prediction: str, unit_tests: str, entry_point: str,
         "from typing import *\n"
         "import collections\n"
         "import itertools\n"
+        "import functools\n"
+        "import heapq\n"
         "import re\n"
+        "import string\n"
+        "from decimal import *\n"
+        "from fractions import *\n"
+        "from statistics import *\n"
     )
     program = (
         f"{imports}\n{prediction}\n\n{unit_tests}\n\n"
