@@ -691,10 +691,25 @@ def _score_prediction(
     source_key = _canonical_source_dataset(row_metadata.get("source_dataset", ""))
     gold_answers = _gold_answers(row_metadata, source_key)
 
+    # --- THE FIX: Strip out all reasoning/chain-of-thought blocks ---
+    clean_text = synthesized_text
+    
+    # Handle DeepSeek/Qwen Reasoning tags
+    if "</think>" in clean_text:
+        clean_text = clean_text.split("</think>")[-1]
+    
+    # Handle the custom MuSiQue scratchpad tags from your prompts.py
+    if "</scratchpad>" in clean_text:
+        clean_text = clean_text.split("</scratchpad>")[-1]
+        
+    clean_text = clean_text.strip()
+    # -----------------------------------------------------------------
+
     if source_key == "musique":
         answerable = bool((row_metadata.get("parsed_metadata") or {}).get("answerable", False))
         references = gold_answers if answerable else [_MUSIQUE_NOT_PRESENT]
-        extracted = extract_qa_answer_musique(synthesized_text)
+        # Pass the clean_text, NOT the raw synthesized_text
+        extracted = extract_qa_answer_musique(clean_text)
         return (
             "musique_token_f1",
             "token_f1",
@@ -706,7 +721,7 @@ def _score_prediction(
         )
 
     if source_key == "quality":
-        extracted = extract_qa_answer(synthesized_text)
+        extracted = extract_qa_answer(clean_text)
         return (
             "token_f1",
             "token_f1",
@@ -718,7 +733,7 @@ def _score_prediction(
         )
 
     if source_key == "fever":
-        extracted = extract_fever_label(synthesized_text)
+        extracted = extract_fever_label(clean_text)
         reference = str(row_metadata.get("gold_label") or "")
         return (
             "label_accuracy",
@@ -728,7 +743,7 @@ def _score_prediction(
         )
 
     if source_key == "hardmath":
-        extracted = extract_math_answer(synthesized_text)
+        extracted = extract_math_answer(clean_text)
         reference = str(row_metadata.get("gold_answer") or "")
         return (
             "math_exact_match",
@@ -737,7 +752,8 @@ def _score_prediction(
             {"extracted_answer": extracted},
         )
 
-    extracted = extract_code_answer(synthesized_text)
+    # HumanEval Plus fallback
+    extracted = extract_code_answer(clean_text)
     return (
         "pass_at_1",
         "pass_at_1",
