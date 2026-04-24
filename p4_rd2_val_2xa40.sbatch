@@ -8,8 +8,9 @@
 # alias — avoids duplicating 8GB of DeepSeek-7B weights.
 #
 # Spread across BOTH GPUs so vLLM's minimum KV-cache reservation fits:
-#   GPU 0: qa(8001, gemma, util 0.42) + general(8003, qwen, util 0.40) ≈ 37.7GB, 8GB headroom
+#   GPU 0: qa(8001, gemma, util 0.48) + general(8003, qwen, util 0.42) ≈ 41.4GB, 4.6GB headroom
 #   GPU 1: reasoning+synth(8002, DS-7B, util 0.40) ≈ 18.4GB + in-process decomposer on cuda:1 (~5GB)
+# Gemma-2-9B's sliding-window attention forces util 0.44+; 0.48 gives headroom.
 #
 # No spec<->synth GPU swap, no cold-start between chunks. Launches staggered
 # by 30s. max-model-len=2048; QuALITY >2048-token contexts truncate.
@@ -60,7 +61,9 @@ PORTS=(8001 8002 8003)
 # GPU 0: qa (gemma 9.5GB) + general (qwen 10GB)  — util 0.42 + 0.40 ≈ 37.7GB, 8GB headroom
 # GPU 1: reasoning+synth (DS 8GB) solo            — util 0.40 ≈ 18.4GB, + decomposer ~5GB = 23GB used, 23GB headroom
 GPUS=(0 1 0)
-GPU_UTIL=(0.42 0.40 0.40)
+# gemma-2-9B needs util 0.44+ (sliding-window attention doubles KV footprint);
+# bumped to 0.48 for 3GB headroom after weights+graphs+KV.
+GPU_UTIL=(0.48 0.40 0.42)
 QUANT=("compressed-tensors" "compressed-tensors" "compressed-tensors")
 
 SERVER_PIDS=()

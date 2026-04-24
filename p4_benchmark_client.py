@@ -68,7 +68,12 @@ _DECOMPOSER_CACHE_PATH = Path("artifacts/p4_decomposer_cache.jsonl")
 _PRE_LAUNCHED_QA_PORT = 8001
 _PRE_LAUNCHED_REASONING_PORT = 8002
 _PRE_LAUNCHED_GENERAL_PORT = 8003
-_PRE_LAUNCHED_SYNTH_PORT = 8004
+# Synth reuses the reasoning server since both run DeepSeek-R1-Qwen-7B-AWQ.
+# Running the same 7B model as two separate vLLM processes wastes ~8GB of
+# duplicated weights — fatal on a single A40 where every GB of KV cache
+# counts. The self-bias guard in synthesis.py checks role names, not api_base,
+# so a distinct 'synthesizer' role pointing at port 8002 satisfies it.
+_PRE_LAUNCHED_SYNTH_PORT = _PRE_LAUNCHED_REASONING_PORT
 
 _PRE_LAUNCHED_QA_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
 _PRE_LAUNCHED_REASONING_MODEL = SYNTHESIZER_MODEL
