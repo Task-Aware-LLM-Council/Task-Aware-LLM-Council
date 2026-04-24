@@ -20,6 +20,7 @@ Usage:
         --results p4_gemma_lora_v2.jsonl
 """
 import argparse
+import ast
 import json
 import re
 from collections import defaultdict
@@ -86,35 +87,51 @@ def _extract_answer(response: str, source: str) -> str:
     return response
 
 
+def _coerce_gold_item(item) -> str | None:
+    """Extract a reference string from a gold entry. Handles dicts
+    ({'text': ..., 'tokens': ...}) and plain strings."""
+    if not item:
+        return None
+    if isinstance(item, dict):
+        text = item.get("text")
+        return str(text) if text else None
+    return str(item)
+
+
 def _gold_as_list(gold):
     """Normalize a gold_answer field to list[str].
 
-    Supports three shapes seen across the benchmark datasets:
-      - str: wrap in a list.
-      - list[str]: pass through.
-      - list[dict]: QuALITY on router_dataset-2 stores each reference as
-        {"text": "...", "tokens": [...]}. Pull out the text field; without
-        this, scoring compares predictions to the dict's Python repr and
-        reports EM=0 even on perfect matches.
+    Shapes seen across the benchmark datasets:
+      - str: most sources (MuSiQue, FEVER, HARDMATH) — wrap in a list.
+      - str that is a Python repr of list[dict]: QuALITY on router_dataset-2.
+        Each entry is {"text": "...", "tokens": [...]}. The dataset
+        serialized the list via str() instead of json; detect by the
+        leading "[{" and parse with ast.literal_eval, then extract text.
+      - list[str] / list[dict]: defensive — older router_dataset used
+        proper lists; handle both here too so the same scorer works
+        across dataset versions.
     """
     if gold is None:
         return []
+
+    # list form (older datasets or future proper-JSON versions)
     if isinstance(gold, list):
-        items: list[str] = []
-        for g in gold:
-            if not g:
-                continue
-            if isinstance(g, dict):
-                text = g.get("text")
-                if text:
-                    items.append(str(text))
-            else:
-                items.append(str(g))
-        return items
+        return [s for s in (_coerce_gold_item(g) for g in gold) if s]
+
     if isinstance(gold, dict):
-        text = gold.get("text")
-        return [str(text)] if text else []
-    return [str(gold)]
+        text = _coerce_gold_item(gold)
+        return [text] if text else []
+
+    # string form — may be a plain answer, or a stringified list of dicts.
+    s = str(gold).strip()
+    if s.startswith("[{") or s.startswith("[\""):
+        try:
+            parsed = ast.literal_eval(s)
+        except (ValueError, SyntaxError):
+            parsed = None
+        if isinstance(parsed, list) and parsed:
+            return [t for t in (_coerce_gold_item(g) for g in parsed) if t]
+    return [s]
 
 
 def _first_present(mapping, keys):
