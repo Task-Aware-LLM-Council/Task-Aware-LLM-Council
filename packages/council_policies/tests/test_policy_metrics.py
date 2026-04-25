@@ -19,7 +19,6 @@ from council_policies import (
     LearnedRouterPolicy,
     P2PromptAdapter,
     P3Adapter,
-    P4Adapter,
     PolicyMetrics,
     PolicyRuntime,
     Subtask,
@@ -234,7 +233,7 @@ async def test_p4_aggregates_specialist_and_synthesizer_metrics():
     )
     runner = CouncilBenchmarkRunner(
         policies=(
-            P4Adapter(
+            LearnedRouterPolicy(
                 router=StubRouter({"math": "math_code", "qa": "qa_reasoning"}),
                 decomposer=StubDecomposer(
                     [Subtask("math step", 0), Subtask("qa step", 1)]
@@ -319,7 +318,7 @@ async def test_runner_isolates_failure_to_single_policy():
     )
     synthesizer_orch = FakeOrchestrator({"synthesizer": FakeClient("synthesizer")})
 
-    # LearnedRouterPolicy (not the P4Adapter duplicate) validates role
+    # LearnedRouterPolicy validates role
     # registration in plan() — so a router role and fallback both missing
     # from the specialist config raises *before* any specialist is called.
     runner = CouncilBenchmarkRunner(

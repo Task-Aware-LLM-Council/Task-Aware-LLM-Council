@@ -26,7 +26,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from task_eval.extraction import extract_math_answer
+from task_eval.extraction import extract_fever_label, extract_math_answer
 from task_eval.scoring import (
     exact_match_multi,
     label_accuracy,
@@ -321,11 +321,15 @@ def main():
             if source == "HARDMATH":
                 pred = extract_math_answer(pred_raw)
             elif source == "FEVER":
-                # Whole-response label scan — robust across specialist styles
-                # (Qwen-14B emits the verdict first then prose, gemma-9B
-                # puts it last). Fallback to generic extraction if no label
-                # token appears at all (rare but possible for long CoT).
-                pred = _fever_extract(pred_raw) or _extract_answer(pred_raw, source)
+                # Use task_eval's FEVER extractor — same one P3 uses. It
+                # accepts synonyms ('supported', 'true', 'yes', 'insufficient',
+                # 'neutral', etc.) and checks NEI-patterns first so 'insufficient
+                # evidence' resolves to NOT ENOUGH INFO instead of being flagged
+                # as wrong. Matches P3's scoring methodology so the comparison
+                # is apples-to-apples.
+                pred = extract_fever_label(pred_raw)
+                if not pred:
+                    pred = _fever_extract(pred_raw) or _extract_answer(pred_raw, source)
             else:
                 pred = _extract_answer(pred_raw, source)
 

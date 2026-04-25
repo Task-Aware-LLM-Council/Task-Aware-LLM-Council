@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-from dataclasses import replace
 from typing import Any
 
 from llm_gateway import PromptRequest
@@ -17,7 +16,6 @@ from council_policies.policy_runner import (
     SpecialistCache,
     SpecialistRequest,
     aggregate_specialist_metrics,
-    build_run_from_cached_response,
     build_specialist_cache_key,
     make_policy_result,
     orchestrator_to_prompt_response,
@@ -30,9 +28,6 @@ from council_policies.prompts import (
     build_voter_prompt,
     parse_vote,
 )
-from council_policies.router import DispatchRun, Router, RoutingDecision, Subtask
-from council_policies.synthesis import synthesize_ordered
-from council_policies.decomposer import Decomposer, PassthroughDecomposer
 
 
 _VOTE_LABELS = list("ABCDEFGHIJ")
@@ -99,171 +94,6 @@ class P3Adapter(BasePolicyAdapter):
             state,
             response=orchestrator_to_prompt_response(response),
             metrics=metrics,
-        )
-
-
-class P4Adapter(BasePolicyAdapter):
-    policy_id = "p4"
-
-    def __init__(
-        self,
-        *,
-        router: Router,
-        decomposer: Decomposer | None = None,
-        fallback_role: str = "fact_general",
-        synthesizer_role: str = "synthesizer",
-        max_subtasks: int = 4,
-    ) -> None:
-        self.router = router
-        self.decomposer = decomposer or PassthroughDecomposer()
-        self.fallback_role = fallback_role
-        self.synthesizer_role = synthesizer_role
-        self.max_subtasks = max_subtasks
-
-    async def plan(
-        self,
-        request: PromptRequest,
-        runtime: PolicyRuntime,
-    ) -> PolicyExecutionState:
-        prompt_text = request.user_prompt or ""
-        context_text = request.context or ""
-        subtasks = await self.decomposer.decompose(prompt_text, context=context_text)
-        if not subtasks:
-            subtasks = [Subtask(text=prompt_text, order=0)]
-        subtasks = sorted(subtasks, key=lambda subtask: subtask.order)[: self.max_subtasks]
-
-        decisions: list[RoutingDecision] = []
-        runs: list[DispatchRun] = []
-        specialist_requests: list[SpecialistRequest] = []
-        run_payloads: list[dict[str, Any]] = []
-
-        for subtask in subtasks:
-            decision = self.router.classify(subtask.text, context=context_text)
-            role = decision.role if runtime.has_specialist_role(decision.role) else self.fallback_role
-            resolved_decision = RoutingDecision(
-                role=role,
-                scores=decision.scores,
-                confidence=decision.confidence,
-                fallback_used=decision.fallback_used or role == self.fallback_role,
-                fallback_reason=decision.fallback_reason,
-            )
-            decisions.append(resolved_decision)
-
-            if runs and runs[-1].role == role:
-                runs[-1].append(subtask)
-            else:
-                run = DispatchRun(role=role)
-                run.append(subtask)
-                runs.append(run)
-
-        for index, run in enumerate(runs):
-            sub_request = replace(request, user_prompt=run.rendered_prompt())
-            cache_key = build_specialist_cache_key(
-                self.policy_id,
-                request,
-                run.role,
-                phase="specialist",
-                prompt_override=sub_request,
-                extra=f"run-{index}",
-            )
-            specialist_requests.append(
-                SpecialistRequest(
-                    cache_key=cache_key,
-                    role=run.role,
-                    request=sub_request,
-                )
-            )
-            run_payloads.append(
-                {
-                    "role": run.role,
-                    "cache_key": cache_key,
-                    "subtasks": [
-                        {"text": subtask.text, "order": subtask.order}
-                        for subtask in run.subtasks
-                    ],
-                }
-            )
-
-        return PolicyExecutionState(
-            policy_id=self.policy_id,
-            request=request,
-            specialist_requests=specialist_requests,
-            metadata={
-                "subtasks": [{"text": subtask.text, "order": subtask.order} for subtask in subtasks],
-                "runs": run_payloads,
-                "router_scores": [decision.scores for decision in decisions],
-                "router_confidence": [decision.confidence for decision in decisions],
-                "router_fallback_used": [decision.fallback_used for decision in decisions],
-                "synthesizer_role": self.synthesizer_role,
-                "synthesis_used": len(run_payloads) > 1,
-            },
-        )
-
-    async def finalize(
-        self,
-        state: PolicyExecutionState,
-        cache: SpecialistCache,
-        runtime: PolicyRuntime,
-    ) -> PolicyResult:
-        run_payloads = list(state.metadata["runs"])
-        confidences = state.metadata.get("router_confidence") or []
-        confidence = (
-            sum(confidences) / len(confidences) if confidences else None
-        )
-
-        if len(run_payloads) == 1:
-            response = cache.get(run_payloads[0]["cache_key"])
-            return make_policy_result(
-                state,
-                response=orchestrator_to_prompt_response(
-                    response,
-                    metadata={"synthesis_short_circuit": "single_run"},
-                ),
-                extra_metadata={"synthesis_short_circuit": "single_run"},
-                metrics=_multi_specialist_metrics(
-                    responses_by_role={run_payloads[0]["role"]: [response]},
-                    confidence=confidence,
-                ),
-            )
-
-        runs: list[DispatchRun] = []
-        responses_by_role: dict[str, list] = {}
-        for run_payload in run_payloads:
-            response = cache.get(run_payload["cache_key"])
-            responses_by_role.setdefault(run_payload["role"], []).append(response)
-            runs.append(
-                build_run_from_cached_response(
-                    run_payload["role"],
-                    run_payload["subtasks"],
-                    response,
-                )
-            )
-
-        orchestrator = await runtime.get_synthesizer_orchestrator()
-        synthesis_result = await synthesize_ordered(
-            question=state.request.user_prompt or "",
-            runs=runs,
-            orchestrator=orchestrator,
-            synthesizer_role=self.synthesizer_role,
-        )
-        responses_by_role[self.synthesizer_role] = [synthesis_result.response]
-        return make_policy_result(
-            state,
-            response=orchestrator_to_prompt_response(
-                synthesis_result.response,
-                metadata={
-                    "synthesis_short_circuit": synthesis_result.metadata.get("short_circuit"),
-                    "synthesis_used_fallback": synthesis_result.used_fallback,
-                },
-            ),
-            extra_metadata={
-                "synthesis_short_circuit": synthesis_result.metadata.get("short_circuit"),
-                "synthesis_used_fallback": synthesis_result.used_fallback,
-            },
-            metrics=_multi_specialist_metrics(
-                responses_by_role=responses_by_role,
-                confidence=confidence,
-            ),
         )
 
 

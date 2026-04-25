@@ -7,9 +7,9 @@ from llm_gateway import PromptRequest
 
 from council_policies import (
     CouncilBenchmarkRunner,
+    LearnedRouterPolicy,
     P2PromptAdapter,
     P3Adapter,
-    P4Adapter,
     PolicyRuntime,
     Subtask,
 )
@@ -124,7 +124,7 @@ async def test_runner_batches_specialists_then_synthesizes_in_second_phase():
     runner = CouncilBenchmarkRunner(
         policies=(
             P3Adapter(),
-            P4Adapter(
+            LearnedRouterPolicy(
                 router=StubRouter({"math": "math_code", "qa": "qa_reasoning"}),
                 decomposer=StubDecomposer(
                     [Subtask("math step", 0), Subtask("qa step", 1)]

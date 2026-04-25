@@ -171,7 +171,7 @@ def _featurize_row(
 
 def _target_text(row: dict[str, Any]) -> str:
     """T5-friendly `role: subtask` lines (shared with serving class)."""
-    from council_policies.seq2seq_decomposer_router import serialize_targets
+    from council_policies.p4.seq2seq_decomposer_router import serialize_targets
     return serialize_targets(row.get("targets") or [])
 
 
@@ -184,7 +184,7 @@ def _parse_generated(text: str) -> list[dict[str, str]] | None:
     """Parse T5 output via the shared `parse_targets` helper. Returns
     None when nothing parseable, so compute_metrics can count it as
     unparseable."""
-    from council_policies.seq2seq_decomposer_router import parse_targets
+    from council_policies.p4.seq2seq_decomposer_router import parse_targets
 
     if not text:
         return None

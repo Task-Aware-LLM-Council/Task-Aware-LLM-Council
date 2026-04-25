@@ -17,8 +17,8 @@ from council_policies.p2_policy import (
     load_all_profiles,
 )
 from council_policies.p3_policy import RuleBasedRoutingPolicy, classify_task
-from council_policies.p4_policy import LearnedRouterPolicy
-from council_policies.policy_adapters import P2PromptAdapter, P3Adapter, P4Adapter
+from council_policies.p4.policy import LearnedRouterPolicy
+from council_policies.policy_adapters import P2PromptAdapter, P3Adapter
 from council_policies.policy_runner import (
     BasePolicyAdapter,
     CouncilBenchmarkRunner,
@@ -54,7 +54,7 @@ from council_policies.hf_causal_generate import (
     DECOMPOSER_ROUTER_SYSTEM_PROMPT,
     HFCausalGenerate,
 )
-from council_policies.seq2seq_decomposer_router import (
+from council_policies.p4.seq2seq_decomposer_router import (
     INPUT_PREFIX,
     GenerateFn,
     HFSeq2SeqGenerate,
@@ -104,7 +104,6 @@ __all__ = [
     "role_to_index",
     "P2PromptAdapter",
     "P3Adapter",
-    "P4Adapter",
     "ModelAnswer",
     "BasePolicyAdapter",
     "PolicyBenchmarkResult",

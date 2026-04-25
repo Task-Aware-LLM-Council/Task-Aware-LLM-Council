@@ -272,7 +272,7 @@ def main() -> int:
         DECOMPOSER_ROUTER_SYSTEM_PROMPT,
     )
     from council_policies.router_featurize import featurize
-    from council_policies.seq2seq_decomposer_router import (
+    from council_policies.p4.seq2seq_decomposer_router import (
         INPUT_PREFIX,
         serialize_targets,
     )

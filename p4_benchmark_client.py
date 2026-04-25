@@ -503,6 +503,11 @@ async def main() -> int:
             user_prompt=row["question"],
             context=row["context"],
             metadata=_request_metadata(row),
+            # DeepSeek-R1 on HumanEval averaged 3k tokens of reasoning.
+            # Without an explicit cap, vLLM may use a server default that
+            # truncates mid-code (observed as 'unterminated string literal'
+            # syntax errors on 3/60 HumanEval rows). Give room to finish.
+            max_tokens=4096,
         )
         for row in rows
     ]
