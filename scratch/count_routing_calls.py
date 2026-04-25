@@ -1,7 +1,16 @@
-"""Count learned-router invocations per source in a P4 results jsonl.
+"""Count P4 component invocations per source in a results jsonl.
 
-Counts routing calls only — force-routed rows (force_role metadata) are
-excluded from the call count because the router was bypassed.
+Reports three model-call counts per source:
+
+  decomposer  — one call per row, except rows where the benchmark client
+                set `force_single_subtask` (FEVER + the two force_role
+                sources). Those rows skip decomposition entirely.
+  router      — one call per subtask routed by the learned router. Rows
+                with `force_role` bypass the router; their routing is
+                synthetic and does not count.
+  synthesizer — one call per row whose response was assembled from more
+                than one specialist run. Single-run rows short-circuit
+                and never touch the synthesizer.
 
 Usage:
     uv run python scratch/count_routing_calls.py --results <file>.jsonl
@@ -12,10 +21,14 @@ from collections import defaultdict
 from pathlib import Path
 
 
-# Sources where the benchmark client bypasses the learned router via
+# Sources where the benchmark client bypassed the learned router via
 # force_role metadata. Routing decisions for these are synthetic, not
 # router invocations.
 FORCE_ROLE_SOURCES = {"HARDMATH", "HumanEvalPlus"}
+
+# Sources where the client set force_single_subtask, skipping the
+# decomposer entirely (the prompt is its own single subtask).
+FORCE_SINGLE_SUBTASK_SOURCES = {"FEVER", "HARDMATH", "HumanEvalPlus"}
 
 
 def _routes(row: dict) -> list:
@@ -33,7 +46,12 @@ def main() -> None:
     args = p.parse_args()
 
     per_source: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"rows": 0, "calls": 0, "forced": 0}
+        lambda: {
+            "rows": 0,
+            "decomposer": 0,
+            "router": 0,
+            "synthesizer": 0,
+        }
     )
     with args.results.open() as f:
         for line in f:
@@ -44,31 +62,30 @@ def main() -> None:
             src = row.get("source_dataset") or "UNKNOWN"
             s = per_source[src]
             s["rows"] += 1
-            if src in FORCE_ROLE_SOURCES:
-                s["forced"] += 1
-                continue
-            s["calls"] += len(_routes(row))
 
-    total_rows = total_calls = total_forced = 0
-    print(f"{'source':<16} {'rows':>5} {'forced':>7} {'calls':>6} {'calls/row':>10}")
-    print("-" * 50)
+            if src not in FORCE_SINGLE_SUBTASK_SOURCES:
+                s["decomposer"] += 1
+
+            routes = _routes(row)
+            if src not in FORCE_ROLE_SOURCES:
+                s["router"] += len(routes)
+
+            if len(routes) > 1:
+                s["synthesizer"] += 1
+
+    cols = ("rows", "decomposer", "router", "synthesizer")
+    header = f"{'source':<16}" + "".join(f"{c:>13}" for c in cols)
+    print(header)
+    print("-" * len(header))
+
+    totals = {c: 0 for c in cols}
     for src, s in sorted(per_source.items()):
-        routed = s["rows"] - s["forced"]
-        cpr = (s["calls"] / routed) if routed else 0.0
-        print(
-            f"{src:<16} {s['rows']:>5} {s['forced']:>7} "
-            f"{s['calls']:>6} {cpr:>10.2f}"
-        )
-        total_rows += s["rows"]
-        total_calls += s["calls"]
-        total_forced += s["forced"]
-    print("-" * 50)
-    routed = total_rows - total_forced
-    cpr = (total_calls / routed) if routed else 0.0
-    print(
-        f"{'ALL':<16} {total_rows:>5} {total_forced:>7} "
-        f"{total_calls:>6} {cpr:>10.2f}"
-    )
+        row_str = f"{src:<16}" + "".join(f"{s[c]:>13}" for c in cols)
+        print(row_str)
+        for c in cols:
+            totals[c] += s[c]
+    print("-" * len(header))
+    print(f"{'ALL':<16}" + "".join(f"{totals[c]:>13}" for c in cols))
 
 
 if __name__ == "__main__":
