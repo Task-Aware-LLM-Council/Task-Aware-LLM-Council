@@ -28,7 +28,7 @@ from dataclasses import dataclass
 import pytest
 from llm_gateway import PromptRequest
 
-from council_policies import (
+from council_policies.p4 import (
     CouncilBenchmarkRunner,
     LearnedRouterPolicy,
     PassthroughDecomposer,

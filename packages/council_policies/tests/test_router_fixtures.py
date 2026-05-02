@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from council_policies.models import TaskType
+from council_policies.p4.types import TaskType
 from council_policies.p4.router import (
     DispatchRun,
     KeywordRouter,

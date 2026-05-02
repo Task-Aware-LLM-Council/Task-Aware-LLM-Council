@@ -14,7 +14,7 @@ from llm_gateway import PromptRequest, PromptResponse, Usage
 from model_orchestration import OrchestratorResponse
 from model_orchestration.models import OrchestratorCallRecord
 
-from council_policies import (
+from council_policies.p4 import (
     CouncilBenchmarkRunner,
     LearnedRouterPolicy,
     P3Adapter,

@@ -1,29 +1,24 @@
 """
 Shared test fixtures for council_policies tests.
 
-Two-phase pattern (reviewer's PR #10 feedback, 2026-04-18):
-  - `FakeOrchestrator` implements the async-context-manager + `load_all`
-    surface that `PolicyRuntime` opens on behalf of adapter-shaped
-    policies (P3/P4). Real orchestrator spins vLLM subprocesses; the
-    fake's enter/exit are no-ops.
-  - `orchestrator_factory` maps sentinel configs → fake orchestrators,
-    so tests can inject specialist and synthesizer fakes separately.
-
-Pattern matches the FakeClient / FakeOrchestrator guidance in
-tests/CLAUDE.md — only `get_client(role)` is exercised on the client
-path, so that's all the fake implements. `make_orch_response()` builds a
-minimal-but-valid `OrchestratorResponse` so tests don't have to
-duplicate its many required fields.
+Combines main's `src/` path bootstrap (for the P2 test suite) with the
+P3/P4 fake-orchestrator fixtures (FakeClient/FakeOrchestrator/ConfigSentinel)
+used by the legacy P3/P4 tests.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
-from llm_gateway import PromptRequest, PromptResponse
-from model_orchestration import OrchestratorResponse
-from model_orchestration.models import OrchestratorCallRecord
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from llm_gateway import PromptRequest, PromptResponse  # noqa: E402
+from model_orchestration import OrchestratorResponse  # noqa: E402
+from model_orchestration.models import OrchestratorCallRecord  # noqa: E402
 
 
 # --------------------------------------------------------------------------- #
@@ -93,10 +88,7 @@ class FakeClient:
 
 
 class FakeOrchestrator:
-    """Async-context-manager + `load_all` + `get_client`. Real
-    `ModelOrchestrator` launches vLLM subprocesses on enter and reclaims
-    GPU memory on exit — the fake's enter/exit are pure bookkeeping so
-    tests can assert the policy opened/closed it correctly."""
+    """Async-context-manager + `load_all` + `get_client`."""
 
     def __init__(self, clients: dict[str, FakeClient]) -> None:
         self._clients = clients
@@ -129,12 +121,6 @@ class FakeOrchestrator:
 # --------------------------------------------------------------------------- #
 # Config sentinels + orchestrator factory
 # --------------------------------------------------------------------------- #
-#
-# P4 takes `specialist_config` and `synthesizer_config` (OrchestratorConfig
-# objects in prod). Tests don't care about the config internals — they
-# care that the factory dispatches each config to the right fake. So we
-# use a minimal ConfigSentinel with a `models` tuple that the policy's
-# construction-time role-registration check walks.
 
 
 class _RoleSpec:
@@ -146,9 +132,7 @@ class _RoleSpec:
 
 
 class ConfigSentinel:
-    """Stand-in for `OrchestratorConfig` during tests. Exposes `models`
-    so `PolicyRuntime._known_roles` can enumerate registered
-    roles/aliases without spinning up a real orchestrator."""
+    """Stand-in for `OrchestratorConfig` during tests."""
     def __init__(self, roles: tuple[str, ...]) -> None:
         self.models = tuple(_RoleSpec(r, (r,)) for r in roles)
 
@@ -193,9 +177,7 @@ def orchestrator_factory(
     specialist_config: ConfigSentinel,
     synthesizer_config: ConfigSentinel,
 ):
-    """Returns a callable the policy uses in place of `ModelOrchestrator`:
-    maps config identity → the right fake. Any unexpected config is a bug
-    in the test, so we raise loudly."""
+    """Returns a callable the policy uses in place of `ModelOrchestrator`."""
     def _factory(config: Any) -> FakeOrchestrator:
         if config is specialist_config:
             return specialist_orch
