@@ -33,12 +33,12 @@ from pathlib import Path
 import hashlib
 
 from common import get_current_user
-from council_policies import (
+from council_policies.p4 import (
     HFCausalGenerate,
     LearnedRouterPolicy,
     Seq2SeqDecomposerRouter,
 )
-from council_policies.policy_runner import (
+from council_policies.p4.policy_runner import (
     CouncilBenchmarkRunner,
     PolicyRuntime,
 )

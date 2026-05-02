@@ -3,7 +3,7 @@
 #SBATCH --gres=gpu:a40:1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=80G
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 #SBATCH --job-name=p4_rd2_val
 #SBATCH --output=p4_run_rd2_val.log
 
