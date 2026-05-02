@@ -40,7 +40,7 @@ from typing import Any
 
 from llm_gateway import PromptRequest
 
-from council_policies.decomposer import Decomposer, PassthroughDecomposer
+from council_policies.p4.decomposer import Decomposer, PassthroughDecomposer
 from council_policies.policy_runner import (
     BasePolicyAdapter,
     PolicyExecutionState,
@@ -56,8 +56,8 @@ from council_policies.policy_runner import (
     orchestrator_to_prompt_response,
     sum_usage,
 )
-from council_policies.router import DispatchRun, RoutingDecision, Router, Subtask
-from council_policies.router_labels import ROLE_LABELS
+from council_policies.p4.router import DispatchRun, RoutingDecision, Router, Subtask
+from council_policies.p4.router_labels import ROLE_LABELS
 from council_policies.synthesis import synthesize_ordered
 
 logger = logging.getLogger(__name__)

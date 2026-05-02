@@ -1,7 +1,7 @@
 """
 Tests for `PolicyMetrics` population + runner error capture.
 
-Scope: every policy (P3/P4/P2) must surface a populated
+Scope: every policy (P3/P4) must surface a populated
 `PolicyResult.metrics` after a successful run, and the runner must turn
 per-policy failures into `metrics.error` rather than propagating the
 exception. Shape-level — exact token counts are delegated to the
@@ -17,13 +17,11 @@ from model_orchestration.models import OrchestratorCallRecord
 from council_policies import (
     CouncilBenchmarkRunner,
     LearnedRouterPolicy,
-    P2PromptAdapter,
     P3Adapter,
     PolicyMetrics,
     PolicyRuntime,
     Subtask,
 )
-from council_policies.prompts import TIEBREAK_SYSTEM_PROMPT, VOTER_SYSTEM_PROMPT
 
 from conftest import ConfigSentinel, FakeClient, FakeOrchestrator
 
@@ -109,7 +107,7 @@ class StubRouter:
 
     def classify(self, prompt: str, *, context: str = ""):
         del context
-        from council_policies.router import RoutingDecision
+        from council_policies.p4.router import RoutingDecision
 
         for needle, role in self._role_map.items():
             if needle in prompt:
@@ -262,48 +260,6 @@ async def test_p4_aggregates_specialist_and_synthesizer_metrics():
 
 
 # --------------------------------------------------------------------------- #
-# P2 metrics
-# --------------------------------------------------------------------------- #
-
-
-@pytest.mark.asyncio
-async def test_p2_metrics_include_voters_and_confidence_margin():
-    spec_cfg = ConfigSentinel(("qa", "reasoning", "general"))
-    synth_cfg = ConfigSentinel(("synthesizer",))
-
-    def vote_response(request):
-        if request.system_prompt in (VOTER_SYSTEM_PROMPT, TIEBREAK_SYSTEM_PROMPT):
-            return "A"  # every voter picks the first candidate
-        return f"candidate-from-{request.user_prompt[:4]}"
-
-    clients = {}
-    for role in ("qa", "reasoning", "general"):
-        clients[role] = _MetricClientWithFn(
-            role, vote_response, latency_ms=80.0,
-            input_tokens=12, output_tokens=6,
-        )
-    specialist_orch = FakeOrchestrator(clients)
-    synthesizer_orch = FakeOrchestrator({"synthesizer": FakeClient("synthesizer")})
-    runner = CouncilBenchmarkRunner(
-        policies=(P2PromptAdapter(),),
-        runtime=_runtime(specialist_orch, synthesizer_orch, spec_cfg, synth_cfg),
-    )
-
-    (result,) = (
-        await runner.run([PromptRequest(user_prompt="Q?")])
-    ).results
-
-    # 3 candidates + 3 voters, each 80ms — total 480ms.
-    assert result.metrics.latency_ms == 480.0
-    assert set(result.metrics.specialist_latency_ms) == {
-        "qa", "reasoning", "general", "_voters"
-    }
-    # Unanimous vote for first candidate → margin 3/3 = 1.0.
-    assert result.metrics.confidence_score == pytest.approx(1.0)
-    assert result.metrics.error is None
-
-
-# --------------------------------------------------------------------------- #
 # Runner error capture
 # --------------------------------------------------------------------------- #
 
@@ -342,21 +298,3 @@ async def test_runner_isolates_failure_to_single_policy():
     assert by_policy["p3"].response.text == "p3-answer"
     assert by_policy["p4"].metrics.error == "RuntimeError"
     assert by_policy["p4"].response.text == ""
-
-
-class _MetricClientWithFn(MetricClient):
-    """MetricClient that picks response text via callable(request)."""
-
-    def __init__(self, role, response_fn, **kwargs):
-        super().__init__(role, text="unused", **kwargs)
-        self._fn = response_fn
-
-    async def get_response(self, request):
-        self.requests.append(request)
-        return _response_with_metrics(
-            self.role,
-            self._fn(request),
-            latency_ms=self.latency_ms,
-            input_tokens=self.input_tokens,
-            output_tokens=self.output_tokens,
-        )

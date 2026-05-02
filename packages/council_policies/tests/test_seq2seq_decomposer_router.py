@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from council_policies.router import Subtask
-from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.p4.router import Subtask
+from council_policies.p4.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
 from council_policies.p4.seq2seq_decomposer_router import (
     INPUT_PREFIX,
     Seq2SeqDecomposerRouter,

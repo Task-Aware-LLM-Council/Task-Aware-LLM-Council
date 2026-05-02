@@ -199,11 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     from council_policies import RouterCard
-    from council_policies.router_featurize import (
+    from council_policies.p4.router_featurize import (
         DEFAULT_CONTEXT_CHAR_CAP,
         featurize,
     )
-    from council_policies.router_labels import (
+    from council_policies.p4.router_labels import (
         DEFAULT_FALLBACK_ROLE,
         ROLE_LABELS,
         role_from_tags,

@@ -1,24 +1,13 @@
-from council_policies.decomposer import (
+from council_policies.p4.decomposer import (
     DEFAULT_DECOMPOSER_SYSTEM_PROMPT,
     Decomposer,
     LLMDecomposer,
     PassthroughDecomposer,
 )
 from council_policies.models import TASK_TO_ROLE, CouncilResponse, TaskType
-from council_policies.p2_policy import (
-    DatasetCouncilPolicy,
-    DatasetVoteSummary,
-    ModelAnswer,
-    P2PolicyResult,
-    P2QuestionResult,
-    RatingEntry,
-    RatingResult,
-    compute_dataset_votes,
-    load_all_profiles,
-)
 from council_policies.p3_policy import RuleBasedRoutingPolicy, classify_task
 from council_policies.p4.policy import LearnedRouterPolicy
-from council_policies.policy_adapters import P2PromptAdapter, P3Adapter
+from council_policies.policy_adapters import P3Adapter
 from council_policies.policy_runner import (
     BasePolicyAdapter,
     CouncilBenchmarkRunner,
@@ -35,7 +24,7 @@ from council_policies.policy_runner import (
     request_fingerprint,
     sum_usage,
 )
-from council_policies.router import (
+from council_policies.p4.router import (
     DispatchRun,
     KeywordRouter,
     LearnedRouter,
@@ -44,13 +33,13 @@ from council_policies.router import (
     ScoreFn,
     Subtask,
 )
-from council_policies.router_card import (
+from council_policies.p4.router_card import (
     CARD_SCHEMA_VERSION,
     DecomposerRouterCard,
     RouterCard,
 )
-from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
-from council_policies.hf_causal_generate import (
+from council_policies.p4.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.p4.hf_causal_generate import (
     DECOMPOSER_ROUTER_SYSTEM_PROMPT,
     HFCausalGenerate,
 )
@@ -60,7 +49,7 @@ from council_policies.p4.seq2seq_decomposer_router import (
     HFSeq2SeqGenerate,
     Seq2SeqDecomposerRouter,
 )
-from council_policies.router_labels import (
+from council_policies.p4.router_labels import (
     DEFAULT_FALLBACK_ROLE,
     ROLE_LABELS,
     SKILL_TAG_PRIORITY_TO_ROLE,
@@ -69,15 +58,12 @@ from council_policies.router_labels import (
     role_to_index,
 )
 from council_policies.synthesis import SynthesisResult, synthesize, synthesize_ordered
-from council_policies.voter import run_vote
 
 __all__ = [
     "CouncilResponse",
     "CouncilBenchmarkRunner",
     "CouncilPolicyAdapter",
     "DEFAULT_DECOMPOSER_SYSTEM_PROMPT",
-    "DatasetCouncilPolicy",
-    "DatasetVoteSummary",
     "Decomposer",
     "LLMDecomposer",
     "DispatchRun",
@@ -102,9 +88,7 @@ __all__ = [
     "index_to_role",
     "role_from_tags",
     "role_to_index",
-    "P2PromptAdapter",
     "P3Adapter",
-    "ModelAnswer",
     "BasePolicyAdapter",
     "PolicyBenchmarkResult",
     "PolicyExecutionState",
@@ -113,11 +97,7 @@ __all__ = [
     "PolicyRuntime",
     "aggregate_specialist_metrics",
     "sum_usage",
-    "P2PolicyResult",
-    "P2QuestionResult",
     "PassthroughDecomposer",
-    "RatingEntry",
-    "RatingResult",
     "Router",
     "RoutingDecision",
     "RuleBasedRoutingPolicy",
@@ -129,10 +109,7 @@ __all__ = [
     "TaskType",
     "build_specialist_cache_key",
     "classify_task",
-    "compute_dataset_votes",
-    "load_all_profiles",
     "request_fingerprint",
-    "run_vote",
     "synthesize",
     "synthesize_ordered",
 ]

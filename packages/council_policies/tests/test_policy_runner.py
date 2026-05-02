@@ -8,12 +8,10 @@ from llm_gateway import PromptRequest
 from council_policies import (
     CouncilBenchmarkRunner,
     LearnedRouterPolicy,
-    P2PromptAdapter,
     P3Adapter,
     PolicyRuntime,
     Subtask,
 )
-from council_policies.prompts import TIEBREAK_SYSTEM_PROMPT, VOTER_SYSTEM_PROMPT
 
 from conftest import ConfigSentinel, FakeClient, FakeOrchestrator
 
@@ -27,11 +25,11 @@ class StubRouter:
         del context
         for needle, role in self.role_map.items():
             if needle in prompt:
-                from council_policies.router import RoutingDecision
+                from council_policies.p4.router import RoutingDecision
 
                 return RoutingDecision(role=role, scores={role: 1.0}, confidence=1.0)
 
-        from council_policies.router import RoutingDecision
+        from council_policies.p4.router import RoutingDecision
 
         return RoutingDecision(
             role=self.default_role,
@@ -184,58 +182,4 @@ async def test_runner_reuses_cached_specialist_calls_for_identical_requests():
     assert len(result.results) == 2
     assert len(result.specialist_cache_keys) == 1
     assert len(specialist_orch.get_client("qa").requests) == 1
-    assert synthesizer_orch.enter_count == 0
-
-
-@pytest.mark.asyncio
-async def test_p2_prompt_adapter_selects_winner_without_synthesizer_phase():
-    def _qa_response(request: PromptRequest) -> str:
-        if request.system_prompt in (VOTER_SYSTEM_PROMPT, TIEBREAK_SYSTEM_PROMPT):
-            return "A"
-        return "best-answer"
-
-    def _reasoning_response(request: PromptRequest) -> str:
-        if request.system_prompt == VOTER_SYSTEM_PROMPT:
-            return "A"
-        if request.system_prompt == TIEBREAK_SYSTEM_PROMPT:
-            return "A"
-        return "second-answer"
-
-    def _general_response(request: PromptRequest) -> str:
-        if request.system_prompt == VOTER_SYSTEM_PROMPT:
-            return "B"
-        if request.system_prompt == TIEBREAK_SYSTEM_PROMPT:
-            return "A"
-        return "third-answer"
-
-    specialist_config = ConfigSentinel(("qa", "reasoning", "general"))
-    synthesizer_config = ConfigSentinel(("synthesizer",))
-    specialist_orch = FakeOrchestrator(
-        {
-            "qa": FakeClient("qa", response_fn=_qa_response),
-            "reasoning": FakeClient("reasoning", response_fn=_reasoning_response),
-            "general": FakeClient("general", response_fn=_general_response),
-        }
-    )
-    synthesizer_orch = FakeOrchestrator(
-        {"synthesizer": FakeClient("synthesizer", text="unused")}
-    )
-    runtime = _make_runtime(
-        specialist_orch,
-        synthesizer_orch,
-        specialist_config,
-        synthesizer_config,
-    )
-    runner = CouncilBenchmarkRunner(policies=(P2PromptAdapter(),), runtime=runtime)
-
-    result = await runner.run([PromptRequest(user_prompt="judge these")])
-
-    assert len(result.results) == 1
-    policy_result = result.results[0]
-    assert policy_result.policy_id == "p2_prompt"
-    assert policy_result.response.text == "best-answer"
-    assert policy_result.metadata["winner_role"] == "qa"
-    assert policy_result.metadata["vote_tally"] == {"qa": 2, "reasoning": 1}
-    assert specialist_orch.enter_count == 1
-    assert specialist_orch.exit_count == 1
     assert synthesizer_orch.enter_count == 0

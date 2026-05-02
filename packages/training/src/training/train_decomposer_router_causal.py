@@ -15,7 +15,7 @@ Train-/serve-parity
 -------------------
 The prompt fed to the model at training time must be byte-identical to the
 one `HFCausalGenerate` builds at serve time. This script reuses:
-  - `DECOMPOSER_ROUTER_SYSTEM_PROMPT` from `council_policies.hf_causal_generate`
+  - `DECOMPOSER_ROUTER_SYSTEM_PROMPT` from `council_policies.p4.hf_causal_generate`
   - `INPUT_PREFIX` + `featurize(question, context)` from the router pipeline
   - `serialize_targets` from `seq2seq_decomposer_router` so labels match the
     parser used in `parse_targets` at eval and serve time.
@@ -268,10 +268,10 @@ def main() -> int:
         TrainingArguments,
     )
 
-    from council_policies.hf_causal_generate import (
+    from council_policies.p4.hf_causal_generate import (
         DECOMPOSER_ROUTER_SYSTEM_PROMPT,
     )
-    from council_policies.router_featurize import featurize
+    from council_policies.p4.router_featurize import featurize
     from council_policies.p4.seq2seq_decomposer_router import (
         INPUT_PREFIX,
         serialize_targets,

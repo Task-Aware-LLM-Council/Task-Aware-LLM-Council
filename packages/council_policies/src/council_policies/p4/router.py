@@ -32,7 +32,7 @@ from model_orchestration import OrchestratorResponse
 
 from council_policies.models import TaskType
 from council_policies.p3_policy import classify_task
-from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.p4.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
 
 logger = logging.getLogger(__name__)
 

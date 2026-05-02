@@ -10,7 +10,7 @@ stack:
   * `_model_version()` format (date-shape + base-model name).
   * Row → example conversion against real-shape rows (question,
     context, skill_tags), matched against
-    `council_policies.router_labels.role_from_tags`.
+    `council_policies.p4.router_labels.role_from_tags`.
 
 Together these catch the most common regression modes — CLI drift
 and label-map drift — without needing the training stack.
@@ -103,8 +103,8 @@ def test_rows_to_examples_maps_real_dataset_shapes():
     """Pin the full (featurize + label) behavior against one row per
     real source dataset. A silent tag rename in data_prep, or a
     featurizer drift, blows up here."""
-    from council_policies.router_featurize import featurize
-    from council_policies.router_labels import role_from_tags, role_to_index
+    from council_policies.p4.router_featurize import featurize
+    from council_policies.p4.router_labels import role_from_tags, role_to_index
 
     rows = [
         {"question": "Write a fn", "context": "", "skill_tags": ["code"]},
@@ -136,8 +136,8 @@ def test_rows_to_examples_handles_missing_fields():
     """Real rows sometimes omit `context` or have `skill_tags=None`
     after HF roundtrip — don't crash. Unknown label → fallback role,
     not dropped."""
-    from council_policies.router_featurize import featurize
-    from council_policies.router_labels import (
+    from council_policies.p4.router_featurize import featurize
+    from council_policies.p4.router_labels import (
         DEFAULT_FALLBACK_ROLE,
         role_from_tags,
         role_to_index,

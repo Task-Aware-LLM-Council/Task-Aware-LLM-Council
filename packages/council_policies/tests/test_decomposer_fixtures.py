@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from council_policies.decomposer import PassthroughDecomposer
-from council_policies.router import Subtask
+from council_policies.p4.decomposer import PassthroughDecomposer
+from council_policies.p4.router import Subtask
 
 
 @pytest.mark.asyncio

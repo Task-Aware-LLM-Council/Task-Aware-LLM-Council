@@ -13,7 +13,7 @@ from typing import Callable
 
 import pytest
 
-from council_policies.router import LearnedRouter, RoutingDecision
+from council_policies.p4.router import LearnedRouter, RoutingDecision
 
 
 def _const(scores: dict[str, float]) -> Callable[[str], dict[str, float]]:

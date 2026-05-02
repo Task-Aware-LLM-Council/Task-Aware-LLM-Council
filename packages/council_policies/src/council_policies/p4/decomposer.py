@@ -18,7 +18,7 @@ from typing import Protocol
 
 from llm_gateway import BaseLLMClient, PromptRequest
 
-from council_policies.router import Subtask
+from council_policies.p4.router import Subtask
 
 logger = logging.getLogger(__name__)
 

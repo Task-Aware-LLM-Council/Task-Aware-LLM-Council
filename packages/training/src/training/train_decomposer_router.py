@@ -11,7 +11,7 @@ Pipeline:
        `build_decomposer_router_dataset.py`).
     2. Featurize each input as
            "decompose_and_route: " + featurize(question, context)
-       reusing `council_policies.router_featurize.featurize` so train-
+       reusing `council_policies.p4.router_featurize.featurize` so train-
        and serve-time inputs are byte-identical.
     3. Targets are newline-delimited `role: subtask` lines (Flan-T5's
        SentencePiece vocab maps `{` and `}` to `<unk>`, so JSON targets
@@ -320,11 +320,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     from council_policies import DecomposerRouterCard, INPUT_PREFIX
-    from council_policies.router_featurize import (
+    from council_policies.p4.router_featurize import (
         DEFAULT_CONTEXT_CHAR_CAP,
         featurize,
     )
-    from council_policies.router_labels import ROLE_LABELS
+    from council_policies.p4.router_labels import ROLE_LABELS
 
     # --- Load splits ------------------------------------------------------ #
     load_kwargs: dict[str, Any] = {}

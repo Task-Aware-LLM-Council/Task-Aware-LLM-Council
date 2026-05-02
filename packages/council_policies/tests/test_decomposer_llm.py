@@ -18,8 +18,8 @@ from dataclasses import dataclass
 import pytest
 from llm_gateway import PromptRequest, PromptResponse
 
-from council_policies.decomposer import LLMDecomposer
-from council_policies.router import Subtask
+from council_policies.p4.decomposer import LLMDecomposer
+from council_policies.p4.router import Subtask
 
 
 @dataclass
@@ -314,7 +314,7 @@ async def test_system_prompt_default_enumerates_roles():
     """Regression guard on the shipped default prompt — if someone
     rewrites it without including the role vocabulary the downstream
     router no longer has a documented target set."""
-    from council_policies.decomposer import DEFAULT_DECOMPOSER_SYSTEM_PROMPT
+    from council_policies.p4.decomposer import DEFAULT_DECOMPOSER_SYSTEM_PROMPT
 
     for role in ("math", "code", "fact_verify", "qa_multihop", "qa_longctx"):
         assert role in DEFAULT_DECOMPOSER_SYSTEM_PROMPT

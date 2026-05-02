@@ -57,16 +57,9 @@ def classify_task(prompt: str) -> TaskType:
 
 
 # ---------------------------------------------------------------------------
-# Lazy synthesis import
-# ---------------------------------------------------------------------------
-# Per the README (§Two aggregation paradigms), P3 aggregates using
-# synthesis.synthesize — NOT voter.run_vote.  synthesis.py is listed as
-# "stable" in the package table but has not been created yet.
-#
-# We attempt the import here so that:
-#   • p3_policy.py is importable and testable right now (no crash).
-#   • The synthesis path activates automatically the moment synthesis.py lands
-#     — no further edits required to p3_policy.py.
+# Lazy synthesis import — kept lazy so an import error in synthesis.py
+# degrades to "return specialist response directly" instead of breaking
+# the whole policy.
 # ---------------------------------------------------------------------------
 try:
     from council_policies.synthesis import synthesize as _synthesize  # type: ignore[import-not-found]

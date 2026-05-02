@@ -42,7 +42,7 @@ from council_policies.policy_runner import (
     CouncilBenchmarkRunner,
     PolicyRuntime,
 )
-from council_policies.router import Subtask
+from council_policies.p4.router import Subtask
 from datasets import load_dataset
 from llm_gateway import PromptRequest, Provider, ProviderConfig
 from model_orchestration import (

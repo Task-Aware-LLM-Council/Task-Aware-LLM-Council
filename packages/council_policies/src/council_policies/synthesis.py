@@ -4,10 +4,8 @@ Synthesis aggregator for P3/P4 multi-skill dispatch.
 Used when a policy fans a task out to multiple specialists (e.g. math + qa)
 and needs to combine their partial outputs into one final answer.
 
-Not to be confused with voter.py (P2's selection-from-redundant-attempts)
-or aggregation.py (deterministic selection strategies). Synthesis is
-*combination*: the output is a new answer produced by a synthesizer LLM,
-not a pick from the inputs.
+Synthesis is *combination*: the output is a new answer produced by a
+synthesizer LLM, not a pick from the inputs.
 
 Design (per Aniruth, 2026-04-17; revised 2026-04-18 for two-phase GPU):
   - Input is partials from specialists (full text, not extracted).
@@ -41,7 +39,7 @@ from council_policies.prompts import (
     build_ordered_synthesis_prompt,
     build_synthesis_prompt,
 )
-from council_policies.router import DispatchRun
+from council_policies.p4.router import DispatchRun
 
 logger = logging.getLogger(__name__)
 

@@ -8,7 +8,7 @@ regression in production.
 
 from __future__ import annotations
 
-from council_policies.router_featurize import (
+from council_policies.p4.router_featurize import (
     DEFAULT_CONTEXT_CHAR_CAP,
     featurize,
 )

@@ -644,7 +644,7 @@ def apply_filters(
     here (not at module top) to keep the module import-light for
     non-ML tooling.
     """
-    from council_policies.router_labels import role_from_tags
+    from council_policies.p4.router_labels import role_from_tags
 
     kept: list[SyntheticRow] = []
     drops: dict[str, int] = {}
@@ -897,7 +897,7 @@ def _build_teacher_client(args: BuildArgs) -> Any:
 
 
 async def _run_pipeline(args: BuildArgs) -> int:
-    from council_policies.router_labels import ROLE_LABELS
+    from council_policies.p4.router_labels import ROLE_LABELS
 
     logger.info("loading gold from %s", args.gold)
     gold_all = load_gold_jsonl(args.gold, role_labels=ROLE_LABELS)

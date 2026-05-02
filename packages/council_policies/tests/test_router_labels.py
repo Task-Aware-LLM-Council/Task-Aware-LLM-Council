@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from council_policies.router_labels import (
+from council_policies.p4.router_labels import (
     DEFAULT_FALLBACK_ROLE,
     ROLE_LABELS,
     index_to_role,

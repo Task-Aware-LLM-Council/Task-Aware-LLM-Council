@@ -13,7 +13,7 @@ from model_orchestration import ModelOrchestrator, OrchestratorConfig, Orchestra
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from council_policies.router import DispatchRun
+    from council_policies.p4.router import DispatchRun
 
 
 def request_fingerprint(request: PromptRequest) -> str:
@@ -242,29 +242,6 @@ class PolicyRuntime:
             cache.put(specialist_request.cache_key, response)
 
         await asyncio.gather(*(_run(request) for request in unique_requests))
-
-    async def execute_vote_request(
-        self,
-        *,
-        role: str,
-        request: PromptRequest,
-    ) -> OrchestratorResponse:
-        await self.open_specialists()
-        return await self.specialist_orchestrator.get_client(role).get_response(request)
-
-    async def execute_vote_requests(
-        self,
-        *,
-        voter_roles: tuple[str, ...],
-        request: PromptRequest,
-    ) -> list[OrchestratorResponse]:
-        await self.open_specialists()
-        return await asyncio.gather(
-            *(
-                self.specialist_orchestrator.get_client(role).get_response(request)
-                for role in voter_roles
-            )
-        )
 
     async def close(self) -> None:
         await self.close_specialists()
@@ -520,7 +497,7 @@ def build_run_from_cached_response(
     subtask_texts: list[dict[str, Any]],
     response: OrchestratorResponse,
 ) -> DispatchRun:
-    from council_policies.router import DispatchRun, Subtask
+    from council_policies.p4.router import DispatchRun, Subtask
 
     run = DispatchRun(role=role)
     for subtask_payload in subtask_texts:

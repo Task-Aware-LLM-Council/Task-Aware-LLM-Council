@@ -45,9 +45,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
-from council_policies.router import Subtask
-from council_policies.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
-from council_policies.router_labels import DEFAULT_FALLBACK_ROLE
+from council_policies.p4.router import Subtask
+from council_policies.p4.router_featurize import DEFAULT_CONTEXT_CHAR_CAP, featurize
+from council_policies.p4.router_labels import DEFAULT_FALLBACK_ROLE
 
 logger = logging.getLogger(__name__)
 

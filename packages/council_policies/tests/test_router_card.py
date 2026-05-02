@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from council_policies.router_card import CARD_SCHEMA_VERSION, RouterCard
+from council_policies.p4.router_card import CARD_SCHEMA_VERSION, RouterCard
 
 
 def _minimal_card(**overrides) -> RouterCard:

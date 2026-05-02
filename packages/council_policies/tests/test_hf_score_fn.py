@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from council_policies.hf_score_fn import HFScoreFn
+from council_policies.p4.hf_score_fn import HFScoreFn
 
 
 class _FakeTensor:
