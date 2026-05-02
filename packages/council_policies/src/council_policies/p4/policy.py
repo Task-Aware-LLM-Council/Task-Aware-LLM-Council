@@ -41,7 +41,7 @@ from typing import Any
 from llm_gateway import PromptRequest
 
 from council_policies.p4.decomposer import Decomposer, PassthroughDecomposer
-from council_policies.policy_runner import (
+from council_policies.p4.policy_runner import (
     BasePolicyAdapter,
     PolicyExecutionState,
     PolicyMetrics,
@@ -58,7 +58,7 @@ from council_policies.policy_runner import (
 )
 from council_policies.p4.router import DispatchRun, RoutingDecision, Router, Subtask
 from council_policies.p4.router_labels import ROLE_LABELS
-from council_policies.synthesis import synthesize_ordered
+from council_policies.p4.synthesis import synthesize_ordered
 
 logger = logging.getLogger(__name__)
 
