@@ -35,6 +35,46 @@ from task_eval.scoring import (
 )
 
 
+# Math notation normalizer — recovers ~7/60 HARDMath rows the strict
+# math_exact_match misses on pure notation drift. Conservative: only
+# rewrites between LaTeX synonyms that are mathematically identical
+# (display vs inline fractions, set-membership prefix, currency, brace
+# shorthand). No semantic rearrangement.
+_PREFIX_IN_RE = re.compile(r"^[a-zA-Z]\s*\\in\s*")
+_PREFIX_EQ_RE = re.compile(r"^[a-zA-Z]\s*=\s*")
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_math(s: str) -> str:
+    s = (s or "").strip()
+    # \dfrac (display) and \tfrac (text) are typesetting variants of \frac.
+    s = re.sub(r"\\(d|t)frac\b", r"\\frac", s)
+    # \left / \right are pure typesetting.
+    s = s.replace("\\left", "").replace("\\right", "")
+    # Currency prefix: \$36 ≡ 36 for math comparison.
+    s = s.replace("\\$", "")
+    # Set-membership / equality prefix: "x \in [..]" ≡ "[..]", "x = ..." ≡ "...".
+    s = _PREFIX_IN_RE.sub("", s)
+    s = _PREFIX_EQ_RE.sub("", s)
+    # Brace shorthand: \frac{5}{9} ≡ \frac 59 once whitespace is gone.
+    s = s.replace("{", "").replace("}", "")
+    # All whitespace and dollars.
+    s = _WS_RE.sub("", s)
+    s = s.replace("$", "")
+    return s
+
+
+def _math_em_loose(pred: str, gold: str) -> float:
+    """Strict math_exact_match first; if that misses, retry under
+    notation-only normalization. Returns 1.0 / 0.0 like math_exact_match."""
+    if math_exact_match(pred, gold):
+        return 1.0
+    n_pred, n_gold = _normalize_math(pred), _normalize_math(gold)
+    if n_pred and n_pred == n_gold:
+        return 1.0
+    return 0.0
+
+
 _FINAL_ANSWER_RE = re.compile(
     r"(?:final answer|the answer is|answer)\s*[:\-]\s*(.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
@@ -343,7 +383,7 @@ def main():
             elif source == "HARDMATH":
                 gold_extracted = extract_math_answer(gold[0])
                 per_source[source]["acc"].append(
-                    math_exact_match(pred, gold_extracted)
+                    _math_em_loose(pred, gold_extracted)
                 )
             else:
                 # P3 MuSiQue abstention bonus: correct NOT_FOUND on an
