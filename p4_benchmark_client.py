@@ -293,24 +293,60 @@ def build_synthesizer_config() -> OrchestratorConfig:
     )
 
 
-def _bump_max_model_len(config: OrchestratorConfig, max_model_len: int) -> OrchestratorConfig:
-    """Override LOCAL_LAUNCH_MAX_MODEL_LEN on every model in `config`.
+def _bump_max_model_len(
+    config: OrchestratorConfig,
+    overrides: dict[str, int],
+) -> OrchestratorConfig:
+    """Selectively override LOCAL_LAUNCH_MAX_MODEL_LEN per role/alias.
 
-    The package default is 8192, which is too tight for HARDMath/HumanEval+
-    where dense-LaTeX or long-code reasoning hits the per-request
-    max_tokens cap before \\boxed{} or full functions are emitted (observed
-    32% of HARDMath rows truncating mid-reasoning at 4096 tokens, against
-    a published P4 baseline of 0.88). vLLM enforces
-    `prompt_tokens + max_tokens <= max_model_len`, so when we raise
-    max_tokens we must raise this in lockstep.
+    Only bump models whose underlying weights actually support a longer
+    context. Gemma-2-9b-it has max_position_embeddings=8192 baked into its
+    config — bumping it triggers a vLLM ValidationError ("user-specified
+    max_model_len ... is greater than the derived max_model_len") because
+    RoPE positions beyond that produce NaN.
+
+    `overrides` keys may be either a model's `role` or any of its aliases.
+    Models whose role/aliases don't appear in `overrides` are left alone.
+
+    The bump is needed for the math_code (DeepSeek) specialist where dense
+    HARDMath/HumanEval+ reasoning hits the per-request max_tokens cap
+    before \\boxed{} or full functions are emitted (observed 32% of
+    HARDMath rows truncating mid-reasoning at 4096 tokens, against a
+    published P4 baseline of 0.88). vLLM enforces
+    `prompt_tokens + max_tokens <= max_model_len`, so raising max_tokens
+    requires raising this in lockstep — but only on the model that can
+    handle it.
     """
     new_models = []
     for spec in config.models:
+        target: int | None = None
+        keys = (spec.role, *spec.aliases)
+        for k in keys:
+            if k in overrides:
+                target = overrides[k]
+                break
+        if target is None:
+            new_models.append(spec)
+            continue
         new_params = dict(spec.provider_config.default_params)
-        new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = str(max_model_len)
+        new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = str(target)
         new_provider = _dc_replace(spec.provider_config, default_params=new_params)
         new_models.append(_dc_replace(spec, provider_config=new_provider))
     return _dc_replace(config, models=tuple(new_models))
+
+
+def _max_tokens_for_source(source: str) -> int:
+    """Per-source generation budget.
+
+    HARDMath and HumanEval+ are force-routed to math_code (DeepSeek), which
+    we bump to max_model_len=16384 so the full 8192-token output budget
+    fits even with prompt overhead. Other sources may route to gemma
+    (max_model_len=8192 per its config), so we cap their output at 4096
+    to leave 4K tokens of prompt headroom.
+    """
+    if source in ("HARDMATH", "HumanEvalPlus"):
+        return 8192
+    return 4096
 
 
 def parse_args() -> argparse.Namespace:
@@ -460,10 +496,16 @@ async def main() -> int:
         max_subtasks=args.max_subtasks,
     )
 
+    # Only bump DeepSeek (reasoning/math_code, supports 128K natively).
+    # Gemma-2-9b-it stays at 8192 — it physically can't go higher.
     specialist_config = _bump_max_model_len(
-        build_default_local_vllm_orchestrator_config(), 16384,
+        build_default_local_vllm_orchestrator_config(),
+        {"reasoning": 16384, "math_code": 16384},
     )
-    synthesizer_config = _bump_max_model_len(build_synthesizer_config(), 16384)
+    synthesizer_config = _bump_max_model_len(
+        build_synthesizer_config(),
+        {SYNTHESIZER_ROLE: 16384},
+    )
 
     done_indices = _load_done_indices(args.out)
     if done_indices:
@@ -527,11 +569,10 @@ async def main() -> int:
             user_prompt=row["question"],
             context=row["context"],
             metadata=_request_metadata(row),
-            # DeepSeek-R1 on HARDMath/HumanEval+ runs long: 4096 tokens
-            # truncated 32% of HARDMath rows mid-reasoning before \boxed{}.
-            # 8192 is paired with max_model_len=16384 (see _bump_max_model_len)
-            # so prompts up to ~8K tokens still fit alongside this output.
-            max_tokens=8192,
+            # Per-source: math/code → 8192 (paired with DeepSeek's bumped
+            # max_model_len=16384), everything else → 4096 to fit gemma's
+            # 8192 model-len with prompt headroom.
+            max_tokens=_max_tokens_for_source(row["source_dataset"]),
         )
         for row in rows
     ]
