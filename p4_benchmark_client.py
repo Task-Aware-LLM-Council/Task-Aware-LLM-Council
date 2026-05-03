@@ -214,8 +214,17 @@ def _build_musique_oracle_map(
     flagged `is_supporting=True`. Router_dataset strips this flag so we
     rebuild it here from the source.
 
-    Falls back to first 4 paragraphs when no is_supporting flag exists
-    (defensive against MuSiQue schema drift)."""
+    Rows with no `is_supporting=True` paragraphs in the upstream emit
+    an empty string. The runner treats that as an oracle miss
+    (`oracle_misses += 1`) and the row falls through to the
+    router_dataset's default context — broken, but legibly so.
+
+    The previous fallback (first 4 paragraphs) silently returned
+    distractor-only context that *looked* like oracle in the cache.
+    Audited at 15% of MuSiQue rows in validation; replacing that with
+    explicit "" lets the runner's miss counter catch the failure mode
+    instead of pretending oracle injection succeeded.
+    """
     cache_path = _musique_oracle_cache_path(source, split)
     if cache_path.exists():
         print(f"Using cached MuSiQue oracle map at {cache_path}")
@@ -224,6 +233,8 @@ def _build_musique_oracle_map(
     print(f"Building MuSiQue oracle map from {source}:{split} ...")
     src = load_dataset(source, split=split)
     mapping: dict[str, str] = {}
+    n_with_support = 0
+    n_unflagged = 0
     for row in src:
         paragraphs = row.get("paragraphs") or []
         supporting = [
@@ -231,19 +242,21 @@ def _build_musique_oracle_map(
             for p in paragraphs
             if isinstance(p, dict) and p.get("is_supporting") is True
         ]
-        if not supporting:
-            supporting = [
-                p.get("paragraph_text", p.get("text", ""))
-                for p in paragraphs[:4]
-                if isinstance(p, dict)
-            ]
+        if supporting:
+            n_with_support += 1
+        else:
+            n_unflagged += 1
         mapping[str(row.get("id", ""))] = "\n\n".join(
             p.strip() for p in supporting if p and p.strip()
         )
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(mapping), encoding="utf-8")
-    print(f"Cached {len(mapping)} rows to {cache_path}")
+    print(
+        f"Cached {len(mapping)} rows to {cache_path} "
+        f"({n_with_support} with is_supporting flags, "
+        f"{n_unflagged} unflagged → empty)"
+    )
     return mapping
 
 
@@ -467,6 +480,15 @@ def build_requests(
             "force_single_subtask": source in single_subtask_sources,
             "force_role": force_role_by_source.get(source),
         })
+
+    if musique_oracle is not None and (oracle_hits or oracle_misses):
+        total = oracle_hits + oracle_misses
+        rate = oracle_hits / total if total else 0.0
+        print(
+            f"MuSiQue oracle: {oracle_hits}/{total} hits "
+            f"({rate:.3f}) — {oracle_misses} rows fell through to "
+            f"router_dataset's default context"
+        )
     return rows
 
 
@@ -543,13 +565,10 @@ async def main() -> int:
         force_role_by_source=force_role_by_source,
     )
     print(f"Built {len(rows)} prompt requests from {args.dataset}:{args.split}")
+    # Per-row hit/miss breakdown is printed inside build_requests; the
+    # map-size line here is just for cache-load confirmation.
     if musique_oracle is not None:
-        musique_rows = sum(1 for r in rows if r.get("source_dataset") == "MuSiQue")
-        print(
-            f"MuSiQue oracle context injected "
-            f"(map size: {len(musique_oracle)}, "
-            f"MuSiQue rows in batch: {musique_rows})"
-        )
+        print(f"MuSiQue oracle map loaded ({len(musique_oracle)} entries)")
     if not rows:
         print("Nothing to do — all rows already completed.")
         return 0
