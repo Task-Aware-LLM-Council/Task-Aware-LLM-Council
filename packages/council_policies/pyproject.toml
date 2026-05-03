@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 p3-policy = "council_policies.cli:main"
+p3-policy-handles = "council_policies.cli_handles:main"
 
 [project.optional-dependencies]
 test = [

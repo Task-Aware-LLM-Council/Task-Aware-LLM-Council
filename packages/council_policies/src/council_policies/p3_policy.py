@@ -75,6 +75,16 @@ _FEVER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Dataset-name → task type mapping.  Checked before keyword matching so that
+# FEVER/HardMath/HumanEval+ rows are never misclassified as qa.
+_DATASET_TO_TASK: dict[str, TaskType] = {
+    "musique": TaskType.QA,
+    "quality": TaskType.QA,
+    "fever": TaskType.FEVER,
+    "hardmath": TaskType.MATH,
+    "humaneval": TaskType.CODE,
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -276,8 +286,10 @@ class RuleBasedRoutingPolicy:
     # ── Classification ────────────────────────────────────────────────────────
 
     def _classify(self, case: EvaluationCase) -> TaskType:
-        text = case.example.question or ""
-        return classify_task(text)
+        dataset = case.example.dataset_name.lower()
+        if dataset in _DATASET_TO_TASK:
+            return _DATASET_TO_TASK[dataset]
+        return classify_task(case.example.question or "")
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
