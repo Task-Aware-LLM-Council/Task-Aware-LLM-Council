@@ -1,6 +1,4 @@
 """
-metrics_analysis.py
-
 Analyzes prediction JSONL outputs from any policy (P1 suite-dir format or
 P2/P3/P4 flat eval format) and produces:
   - Avg Tokens Per Question
