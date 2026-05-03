@@ -43,8 +43,10 @@ from council_policies.p4.policy_runner import (
     PolicyRuntime,
 )
 from council_policies.p4.router import Subtask
+from dataclasses import replace as _dc_replace
+
 from datasets import load_dataset
-from llm_gateway import PromptRequest, Provider, ProviderConfig
+from llm_gateway import LOCAL_LAUNCH_MAX_MODEL_LEN, PromptRequest, Provider, ProviderConfig
 from model_orchestration import (
     ModelSpec,
     OrchestratorConfig,
@@ -291,6 +293,26 @@ def build_synthesizer_config() -> OrchestratorConfig:
     )
 
 
+def _bump_max_model_len(config: OrchestratorConfig, max_model_len: int) -> OrchestratorConfig:
+    """Override LOCAL_LAUNCH_MAX_MODEL_LEN on every model in `config`.
+
+    The package default is 8192, which is too tight for HARDMath/HumanEval+
+    where dense-LaTeX or long-code reasoning hits the per-request
+    max_tokens cap before \\boxed{} or full functions are emitted (observed
+    32% of HARDMath rows truncating mid-reasoning at 4096 tokens, against
+    a published P4 baseline of 0.88). vLLM enforces
+    `prompt_tokens + max_tokens <= max_model_len`, so when we raise
+    max_tokens we must raise this in lockstep.
+    """
+    new_models = []
+    for spec in config.models:
+        new_params = dict(spec.provider_config.default_params)
+        new_params[LOCAL_LAUNCH_MAX_MODEL_LEN] = str(max_model_len)
+        new_provider = _dc_replace(spec.provider_config, default_params=new_params)
+        new_models.append(_dc_replace(spec, provider_config=new_provider))
+    return _dc_replace(config, models=tuple(new_models))
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model-dir", default="google/gemma-2-2b-it",
@@ -438,8 +460,10 @@ async def main() -> int:
         max_subtasks=args.max_subtasks,
     )
 
-    specialist_config = build_default_local_vllm_orchestrator_config()
-    synthesizer_config = build_synthesizer_config()
+    specialist_config = _bump_max_model_len(
+        build_default_local_vllm_orchestrator_config(), 16384,
+    )
+    synthesizer_config = _bump_max_model_len(build_synthesizer_config(), 16384)
 
     done_indices = _load_done_indices(args.out)
     if done_indices:
@@ -503,11 +527,11 @@ async def main() -> int:
             user_prompt=row["question"],
             context=row["context"],
             metadata=_request_metadata(row),
-            # DeepSeek-R1 on HumanEval averaged 3k tokens of reasoning.
-            # Without an explicit cap, vLLM may use a server default that
-            # truncates mid-code (observed as 'unterminated string literal'
-            # syntax errors on 3/60 HumanEval rows). Give room to finish.
-            max_tokens=4096,
+            # DeepSeek-R1 on HARDMath/HumanEval+ runs long: 4096 tokens
+            # truncated 32% of HARDMath rows mid-reasoning before \boxed{}.
+            # 8192 is paired with max_model_len=16384 (see _bump_max_model_len)
+            # so prompts up to ~8K tokens still fit alongside this output.
+            max_tokens=8192,
         )
         for row in rows
     ]
