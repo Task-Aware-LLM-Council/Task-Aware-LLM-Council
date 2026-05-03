@@ -6,22 +6,25 @@ from llm_gateway import Provider, ProviderConfig
 from benchmark_runner.models import BenchmarkSpec, DatasetRunConfig
 
 MODEL_POOL: tuple[str, ...] = (
-    # Generalists (MuSiQue, FEVER)
-    "internlm/internlm2_5-7b-chat-1m", # Done
-    "google/gemma-2-9b-it", # Done
-    "Qwen/Qwen2.5-7B-Instruct", # Done
-    "NousResearch/Hermes-3-Llama-3.1-8B", # Done
-    # Long-Context Specialists (QuALITY)
-    "mistralai/Mistral-Nemo-Instruct-2407", # Done
-    "Qwen/Qwen2.5-14B-Instruct", # Done
-    # Math Specialists (HARDMath)
-    "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", # Done
-    "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", # Done
-    "01-ai/Yi-1.5-9B-Chat-16K", # Done
-    # Code Specialists (HumanEval+)
-    "Qwen/Qwen2.5-Coder-7B-Instruct", # Done
-    "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct", # Done
-    "THUDM/glm-4-9b-chat" # Done
+    "task-aware-llm-council/gemma-2-9b-it-GPTQ",
+    "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2",
+    "task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2",
+    # # Generalists (MuSiQue, FEVER)
+    # "internlm/internlm2_5-7b-chat-1m", # Done
+    # "google/gemma-2-9b-it", # Done
+    # "Qwen/Qwen2.5-7B-Instruct", # Done
+    # "NousResearch/Hermes-3-Llama-3.1-8B", # Done
+    # # Long-Context Specialists (QuALITY)
+    # "mistralai/Mistral-Nemo-Instruct-2407", # Done
+    # "Qwen/Qwen2.5-14B-Instruct", # Done
+    # # Math Specialists (HARDMath)
+    # "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", # Done
+    # "deepseek-ai/DeepSeek-R1-Distill-Llama-8B", # Done
+    # "01-ai/Yi-1.5-9B-Chat-16K", # Done
+    # # Code Specialists (HumanEval+)
+    # "Qwen/Qwen2.5-Coder-7B-Instruct", # Done
+    # "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct", # Done
+    # "THUDM/glm-4-9b-chat" # Done
 )
 
 DATASET_CONFIGS: tuple[DatasetRunConfig, ...] = (
