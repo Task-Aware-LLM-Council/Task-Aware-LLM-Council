@@ -216,6 +216,14 @@ split.
 
 ## 5. Submit the full job
 
+You have two partitions available. Pick one based on queue state right
+now — the output JSONL is partition-agnostic so you can switch later if
+you change your mind.
+
+### Option A — `gpu` partition (default, 2 h jobs)
+
+The standard path. Submit and tail the log:
+
 ```bash
 sbatch p4_rd2_val.sbatch
 squeue -u $USER          # watch the queue
@@ -224,7 +232,66 @@ tail -f p4_run_rd2_val.log   # live log once the job starts
 
 Each job is wall-time-capped at 2 h (see `#SBATCH --time=02:00:00`). On a
 full split that is **not** enough to finish — which is the whole point of
-the resume loop below.
+the resume loop in §6.
+
+### Option B — `debug` partition (30 min jobs, congestion alternative)
+
+If the `gpu` queue is congested but `debug` is open, you can run the
+full eval entirely on debug compute. The walltime is 30 min instead of
+2 h, so you submit ~4× as many jobs — but each one usually drops in
+fast, and the resume loop in §6 handles the multi-job pattern
+transparently.
+
+Copy `p4_debug.sbatch` (built in §4 Option B) to `p4_debug_full.sbatch`
+and switch the run line back to a real `--limit` and a real output path:
+
+```bash
+#SBATCH --partition=debug
+#SBATCH --time=00:30:00
+#SBATCH --gres=gpu:a40:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=40G
+#SBATCH --job-name=p4_debug_full
+#SBATCH --output=p4_debug_full.log
+
+# ... (apptainer / PATH / threading setup unchanged) ...
+
+uv run --package council_policies --with peft python p4_benchmark_client.py \
+  --dataset task-aware-llm-council/router_dataset-2 \
+  --split validation \
+  --limit -1 \
+  --chunk-size 60 \
+  --peft-adapter artifacts/decomposer_router_causal/adapter \
+  --out p4_gemma_lora_v2_rd2_val.jsonl
+```
+
+Submit and tail the same way as Option A:
+
+```bash
+sbatch p4_debug_full.sbatch
+squeue -u $USER
+tail -f p4_debug_full.log
+```
+
+Notes specific to running the full eval on debug compute:
+
+- **Drop `--chunk-size` to 40–60.** A 2 h job at chunk-size 100 fits
+  ~1 chunk per spec↔synth swap cycle. A 30 min job at chunk-size 100
+  may not even finish *one* full chunk on slower rows, which means the
+  job dies before its first JSONL flush and you make zero progress.
+  60 is the safe ceiling; 40 if you're seeing late-chunk timeouts.
+- **More cold-start tax.** Each submission pays the ~8-min spec↔synth
+  swap. A 30 min job spends a meaningful fraction of its budget on
+  cold start, so throughput per wall-clock-hour is lower than on `gpu`.
+  The win is queue latency, not compute efficiency.
+- **Mixing `gpu` and `debug` is fine.** The output JSONL is the only
+  state, and resume-by-`index` doesn't care which partition wrote each
+  row. You can switch partitions between resubmissions freely. Running
+  one `gpu` and one `debug_full` job *concurrently* against the same
+  `--out` is also possible but introduces a rare duplicate-row race
+  (`_load_done_indices` is snapshotted once at startup, not refreshed
+  mid-run) — fine if rare, run sequentially if you don't want to think
+  about it.
 
 ---
 
@@ -285,17 +352,153 @@ JSONL line count — and exits cleanly once the file is full.
 
 ---
 
-## 7. Inspect results
+## 7. Getting the results
+
+The runner produces one JSONL with one row per prompt; everything below
+operates on that file. Path examples assume `OUT=p4_gemma_lora_v2_rd2_val.jsonl`.
+
+### 7a. Output schema
+
+Each line is a flat JSON object:
+
+| field | type | meaning |
+| --- | --- | --- |
+| `index` | int | row index in the source split (the resume key) |
+| `source_dataset` | str | one of `MuSiQue`, `FEVER`, `QuALITY`, `HARDMATH`, `HumanEvalPlus` |
+| `question` | str | prompt the policy actually saw (post-template) |
+| `context` | str | retrieved/oracle context for QA-ish rows; `""` otherwise |
+| `gold_answer` | str / list | reference answer(s); list-of-dicts on QuALITY (router_dataset-2 quirk) |
+| `gold_label` | str | reference label, FEVER only |
+| `force_single_subtask` | bool | runner skipped decomposition for this row |
+| `force_role` | str / null | runner pinned the role (bypassed the learned router) |
+| `p4_answer` | str | the synthesized response — what scoring extracts from |
+| `predicted_route` | list[str] | the role(s) the router actually picked |
+| `synthesis_used` | bool | true ⇔ more than one specialist run was fused |
+| `error` | str / null | populated only if the chunk crashed mid-row |
+| `latency_ms` | float | wall-time for the whole pipeline on this row |
+
+### 7b. Sanity-check one-liners
 
 ```bash
-wc -l p4_gemma_lora_v2_rd2_val.jsonl                  # total rows
-jq -s 'length' p4_gemma_lora_v2_rd2_val.jsonl         # same, validating JSON
-jq -c '{index, task_type, winner_role: .metadata.routed_role}' \
-  p4_gemma_lora_v2_rd2_val.jsonl | head
+OUT=p4_gemma_lora_v2_rd2_val.jsonl
+
+# total rows + JSON validity
+wc -l "$OUT"
+jq -s 'length' "$OUT"
+
+# error rate
+jq -s '[.[] | select(.error != null)] | length' "$OUT"
+
+# rows per source — fastest look at coverage
+jq -r '.source_dataset' "$OUT" | sort | uniq -c
+
+# routing distribution by source
+jq -r '"\(.source_dataset)\t\(.predicted_route | join(","))"' "$OUT" \
+  | sort | uniq -c | sort -rn | head -20
+
+# latency percentiles (rough)
+jq -s '[.[] | .latency_ms] | sort | .[length/2|floor], .[length*9/10|floor]' "$OUT"
 ```
 
-Each line is one prompt's `CouncilResponse` plus provenance
-(`routed_role`, `synthesizer_role`, latency, usage).
+### 7c. Score the non-code datasets
+
+`scratch/score_p4_results.py` mirrors P3's grading methodology so P3↔P4
+comparisons are apples-to-apples. It scores MuSiQue, QuALITY, FEVER, and
+HARDMATH from a single JSONL and skips HumanEvalPlus (executed
+separately):
+
+```bash
+OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  uv run --package task_eval python scratch/score_p4_results.py \
+  --results "$OUT"
+```
+
+Output is a single table:
+
+```text
+source                  n  err       EM       F1      Acc  abst
+------------------------------------------------------------------
+FEVER                 500    2        -        -    0.612     0
+HARDMATH              500    0        -        -    0.388     0
+MuSiQue               500    1    0.482    0.601        -    37
+QuALITY               500    0    0.541    0.694        -     0
+```
+
+How to read it:
+
+- **EM / F1** — exact-match and token-F1 (best-of-golds for multi-ref
+  datasets), reported on extracted final answers.
+- **Acc** — label or boxed-numeric accuracy for FEVER and HARDMATH.
+- **abst** — MuSiQue rows where the model correctly said "NOT PRESENT IN
+  CONTEXT" on an unanswerable row and got the abstention bonus
+  (EM=F1=1). Pass `--no-abstention` to disable; without it you under-
+  count P3-equivalent score.
+- **err** — rows that crashed mid-chunk. If non-zero, rerun the sbatch
+  to fill them in (resume by `index` is automatic).
+
+### 7d. Score HumanEvalPlus pass@1
+
+Code execution lives in a separate script because it runs candidate code
+in a subprocess with a timeout (the rest of the metrics are pure-text):
+
+```bash
+uv run --package task_eval python scratch/score_humaneval_pass1.py \
+  --results "$OUT" \
+  --dataset task-aware-llm-council/router_dataset-2 \
+  --split validation \
+  --timeout 10
+```
+
+Prints `pass@1 = K/N = X.XXX` and the first 15 failing `entry_point`
+names. **Sandbox warning:** the script imports and executes the model's
+generated Python in a subprocess. Only point it at trusted public test
+suites (HumanEval is fine) — never at adversarial code.
+
+### 7e. Routing analysis (optional)
+
+Two scripts dig into where the router spent its calls vs. how well it
+classified:
+
+```bash
+# how many decomposer / router / synthesizer calls hit per source
+uv run python scratch/count_routing_calls.py --results "$OUT"
+
+# routing accuracy + latency / output-length per source
+uv run python scratch/benchmark_stats.py --results "$OUT"
+```
+
+`benchmark_stats.py`'s "routing accuracy" column is the one to watch —
+it tells you how often the learned router picked a *plausible* role for
+each source (vs. the trivially-100% `force_role` rows which are
+synthetic).
+
+### 7f. Diagnose specific failure modes
+
+When a metric drops, the `scratch/diagnose_*.py` scripts dump the rows
+that contributed:
+
+| script | use when |
+| --- | --- |
+| `diagnose_fever_qwen_regression.py` | FEVER label-accuracy below baseline; surfaces which label the model picked vs. gold |
+| `diagnose_quality_regression.py` | QuALITY token-F1 looks low; shows extracted-vs-gold pairs |
+| `diagnose_humaneval_failures.py` | HumanEvalPlus pass@1 below baseline; runs the test, prints stderr for failing samples |
+
+All three take `--results "$OUT"` and write summaries to stdout. Use
+them *after* you have the headline scores from 7c/7d — they are
+expensive (re-run extraction + occasionally re-execute code) and only
+worth running on a regression you want to investigate.
+
+### 7g. Promoting the run
+
+Once you have the JSONL plus the score table, the artifacts that matter
+for a writeup are:
+
+1. The raw JSONL (`$OUT`) — full provenance, never overwrite.
+2. The score table from 7c (paste into `docs/p4-report.md` or your run
+   log).
+3. The `pass@1` line from 7d.
+4. The decomposer cache at `artifacts/p4_decomposer_cache.jsonl` — so
+   the next run can skip its decomposer calls.
 
 ---
 
