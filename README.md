@@ -175,7 +175,7 @@ P3 lives on a separate branch since there are multiple steps to run it.
 
 ```bash
 git fetch origin
-git checkout <P3_BRANCH_NAME>
+git checkout please_work
 ```
 
 ## P4 Branch
