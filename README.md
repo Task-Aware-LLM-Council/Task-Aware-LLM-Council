@@ -1,95 +1,94 @@
-# Task-Aware LLM Council
+# Task-Aware LLM Council — P3 Branch
 
-Monorepo for building, packaging, and consuming a router dataset for NLP workflows.
+This branch (`please_work`) reproduces the rule-based routing (P3) council policy. The README only documents what is needed to reproduce P3 results — for P1, P2, and P4 use the corresponding branches.
 
-## Project Setup (uv)
+## Environment Setup
 
 ### Prerequisites
 
-- `uv` - https://docs.astral.sh/uv/getting-started/installation/
+- Python >=3.12
+- `uv`: https://docs.astral.sh/uv/getting-started/installation/
+- For running on CARC, vLLM and Python apptainer images are required. Copy both of them from this location - `/project2/robinjia_1822/apptainer-compatible-images-dont-delete` to the root of repository.
 
-### Initial setup
+### Install
 
-- Clone the repository and move into the project root.
-- Run `uv sync` to install dependencies and set up the workspace.
+Clone the repository, check out this branch, move into the project root, and sync every workspace package:
 
-### Recommended uv workflow
-- Keep everything as separate packages under `packages/` for better modularity and dependency management.
 ```
-uv init --lib packages/<package_name>
-```
-- Use `uv sync` when dependencies change (from root folder).
-- Use `uv add <dependency>` to add dependencies to specific packages.
-```
-cd packages/<package_1>
-uv add <package_2>  # Adds package_2 as a dependency to package_1
-cd ../../
-uv lock  # Update the lockfile after adding dependencies
-uv sync  # Sync the workspace to install new dependencies
-```
-- Use `uv run` to execute scripts without manually activating the environment.
-```
- uv run -m <package_name>.<script_name>
-```
-- Use workspace-aware sync/install options when working across all packages.
-- Make sure to select correct interpreters in VSCode (Ctrl+Shift+P > Python: Select Interpreter) to get proper linting and IntelliSense.
-
-## Project Structure
-
-```text
-NLP-Project/
-|- pyproject.toml              # Root uv workspace config
-|- main.py                     # Root entry script (placeholder)
-|- data/
-|  |- router_dataset/       # Local parquet exports
-|- packages/
-|  |- common/
-|  |  |- src/common/           # Shared schemas, IO, IDs, split/util helpers
-|  |- data_prep/
-|  |  |- src/data_prep/        # Dataset loaders, dataset build/upload scripts
-|  |- training/
-|  |  |- src/training/         # Dataset consumption/training-facing scripts
-|  |- inference/
-|  |  |- src/inference/        # Inference package scaffold
-|  |- llm_gateway/
-|  |  |- src/llm_gateway/        # client layer for text-generation style LLM calls
-|- update_parquet_files.ipynb  # Notebook utility for parquet updates
+git fetch origin
+git checkout please_work
+uv sync --all-packages
 ```
 
-## Available Script Types
+Use `uv run` for commands so package entry points resolve from the workspace environment:
 
-Fill in your preferred command format for each item below.
-
-### Data preparation scripts
-
-- Build common dataset
 ```
-uv run -m data_prep.build_router_dataset  
-- Modify parquet files using the provided notebook (update_parquet_files.ipynb) or custom scripts as needed. Handle the parquet files as pandas dataframe and make modifications, then save back to the same location to update the dataset splits.
+uv run <command> --help
 ```
-- Upload to Hugging Face Hub (ask for token if you don't have it)
+
+### Provider Credentials
+
+P3 runs locally on vLLM and does not need an API key, but it does need the local vLLM Apptainer image (see Prerequisites). If you want to swap to a hosted provider, export only the keys you plan to use:
+
 ```
-uv run -m data_prep.upload_dataset --folder-path='./data/router_dataset' --commit-message="<commit message>"
+export OPENAI_API_KEY=<openai-key>
+export OPENROUTER_API_KEY=<openrouter-key>
+export HUGGINGFACE_API_KEY=<huggingface-key>
+export NVIDIA_API_KEY=<nvidia-key>
 ```
-<!-- ### Training scripts
 
-- Consume/inspect prepared dataset splits for downstream training workflows.
+## Steps To Reproduce Results
 
-### Inference scripts
+All these tests were done on CARC using a40, so make sure to get correct resources assigned. `srun --pty -p gpu --gres=gpu:a40:1 --account=robinjia_1822 --time=04:00:00 --cpus-per-task=8 --mem=64G bash`
 
-- Inference package scaffold is present; runtime scripts can be added here.
+Run `module load apptainer` after resources are allocated. This is required to load apptainer runtime.
 
-### Shared utility modules (imported by scripts)
+P3 uses these final models as specialists, so only these models should be used. Ignore any other models in the repository, since there are few other models that were part of initial pool of models from which specialists were chosen.
 
-- Hugging Face dataset IO helpers.
-- Router schema/types.
-- ID generation and split utilities.
+```
+"task-aware-llm-council/gemma-2-9b-it-GPTQ"
+"task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
+"task-aware-llm-council/Qwen2.5-14B-Instruct-AWQ-2"
+```
 
-### Root-level scripts
+**Note** P3 was run on single a40 GPU (since getting multiple GPUs was almost impossible), hence use a40 since it is the minimum spec GPU with enough vRAM to run 3 models and minimum CUDA Compute Capability to run vLLM.
 
-- Project sanity-check or bootstrap script from `main.py`.
+### Rule-Based-Routing (P3) Council Benchmarking
 
-## Notes
+P3 uses `council_policies` to route every question to a single specialist (no voting, no synthesis). The dataset name + keyword regexes over the question pick one of `qa` / `reasoning` / `math` / `code` / `fever`, that task type is mapped to a specialist role, and that role's model produces the final answer. The CLI attaches a per-dataset system prompt that constrains output shape (`Final Answer:` / `\boxed{}` / fenced ```python block / `SUPPORTS|REFUTES|NOT ENOUGH INFO`) and scores the response with the matching metric.
 
-- This repo uses a uv workspace with members in `packages/common`, `packages/data_prep`, `packages/training`, and `packages/inference`.
-- Internal package linking is configured via workspace sources (for example, `common` used by `data_prep` and `training`). -->
+This will load all 3 specialists in one GPU and keep them loaded for the entire run — there is no swap phase like in P2. The whole process can take ~45–60 min on a single a40.
+
+#### Local vLLM Run
+
+```
+uv run p3-policy
+```
+
+That is the whole command — model selection, routing, dataset, and scoring are all wired to the three council specialists and the `task-aware-llm-council/router_dataset` test split.
+
+Default P3 output file (written to the current working directory):
+
+```
+results_p3_eval_local.jsonl
+```
+
+Each record contains `example_id`, `dataset_name`, `suite_id`, `question`, `system_prompt`, `context`, `task_type`, `routed_role`, `model`, `response_text`, `latency_ms`, `failed`, `error`, `usage`, `reference`, and a `metrics` block with the dataset's relevant scorer:
+
+- `musique`, `quality` → `token_f1`, `exact_match`
+- `fever`, `hardmath` → `accuracy`
+- `humaneval` → `pass_at_1`
+
+`metric_metadata.extracted_answer` records exactly what the scorer compared. At the end of the run the CLI prints a routing summary per dataset (question count, role distribution, task-type distribution, average latency).
+
+If `task_eval.scoring.pass_at_1` is importable and apptainer is available, HumanEval predictions are executed inside the sandbox harness against the dataset's `test_code` + `entry_point`. Otherwise the scorer falls back to a bare `python3` exec.
+
+## Tests
+
+Run package tests from the workspace root:
+
+```
+uv run pytest packages/council_policies/tests
+uv run pytest packages/task_eval/tests
+uv run pytest packages/model-orchestration/tests
+```
