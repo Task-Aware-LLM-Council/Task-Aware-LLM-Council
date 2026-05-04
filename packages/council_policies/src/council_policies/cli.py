@@ -1,7 +1,7 @@
 """
-P3 Policy evaluation CLI — local vLLM variant (cli_claude.py).
+P3 Policy evaluation CLI — local vLLM variant.
 
-Fork of cli.py with the following fixes to raise task metrics:
+Fixes applied to raise task metrics:
 
 1. **Per-dataset system prompts** — every BenchmarkExample is now built with a
    system_prompt that constrains the model's output format (Final Answer: /
@@ -543,7 +543,7 @@ async def async_main() -> None:
 
 
 def main() -> None:
-    print("Starting P3 policy evaluation CLI (local vLLM, cli_claude variant)...")
+    print("Starting P3 policy evaluation CLI (local vLLM)...")
     asyncio.run(async_main())
 
 
