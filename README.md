@@ -185,7 +185,7 @@ P4 lives on a separate branch since there are multiple steps to run it.
 
 ```bash
 git fetch origin
-git checkout <P4_BRANCH_NAME>
+git checkout router-training
 ```
 
 **NOTE** The following sections are not related to reproducing results, and just documents extra code that is part of the repo, like data prep etc.
