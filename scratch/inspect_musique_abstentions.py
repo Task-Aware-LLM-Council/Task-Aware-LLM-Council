@@ -26,6 +26,20 @@ _ABSTAIN_SENTINELS = frozenset({
     "UNANSWERABLE", "CANNOT BE ANSWERED", "CANNOT ANSWER", "NO ANSWER",
 })
 
+_FINAL_ANSWER_RE = re.compile(
+    r"(?:final answer|the answer is|answer)\s*[:\-]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _strip_markdown(text: str) -> str:
+    s = (text or "").strip()
+    while s and s[0] in "*_":
+        s = s[1:]
+    while s and s[-1] in "*_":
+        s = s[:-1]
+    return s.strip()
+
 
 def _is_abstention(pred: str) -> bool:
     cleaned = (pred or "").strip().rstrip(".").upper()
@@ -33,14 +47,20 @@ def _is_abstention(pred: str) -> bool:
 
 
 def _extract_final_answer(response: str) -> str:
-    """Mirror score_p4_results._extract_answer's last-line behavior."""
+    """Mirror score_p4_results._extract_answer: 'Final Answer:' regex
+    first, then last-non-empty-line fallback."""
     response = (response or "").strip()
     if not response:
         return ""
+    if response.upper().rstrip(".").strip() in _ABSTAIN_SENTINELS:
+        return response
+    matches = _FINAL_ANSWER_RE.findall(response)
+    if matches:
+        return _strip_markdown(matches[-1].strip().rstrip("."))
     for line in reversed(response.splitlines()):
         stripped = line.strip()
         if stripped:
-            return stripped.rstrip(".")
+            return _strip_markdown(stripped.rstrip("."))
     return response
 
 
