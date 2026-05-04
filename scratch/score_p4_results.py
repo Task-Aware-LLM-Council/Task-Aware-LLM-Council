@@ -167,6 +167,54 @@ def _strip_markdown(text: str) -> str:
     return s.strip()
 
 
+# MuSiQue subject-phrase trimmer. Specialists frequently wrap the answer
+# in a sentence ("X has Y", "X was born on Y", "X signed Y") which makes
+# token-F1 collapse from precision penalty even when the answer is fully
+# present.
+#
+# Two-pass strip:
+#   1. _SUBJECT_TRIM_RE removes the leading "<subject> <single linking verb>"
+#      so "Gustave Courbet was born on 10 June 1819" → "born on 10 June 1819".
+#   2. _LEADING_VERB_RE then strips the verb phrase if it leads the
+#      remainder, so "born on 10 June 1819" → "10 June 1819".
+# Conservative bounds: only fires on multi-token predictions, and falls
+# back to the input if a trim produces <3 chars.
+_SUBJECT_TRIM_RE = re.compile(
+    r"^.+?\s(?:is|was|are|were|has|have|had|became|signed|made|wrote|"
+    r"built|constructed|established|founded|located|placed|published|"
+    r"released)\s+(.+)$",
+    re.IGNORECASE,
+)
+_LEADING_VERB_RE = re.compile(
+    r"^(?:born\s+(?:on|in)|set\s+(?:on|in)|located\s+in|placed\s+in|"
+    r"constructed\s+in|built\s+in|established\s+in|founded\s+in|"
+    r"published\s+in|released\s+in)\s+",
+    re.IGNORECASE,
+)
+
+
+def _trim_subject_prefix(text: str) -> str:
+    """Strip "<subject> <linking verb>" then any residual leading verb
+    phrase. No-op if the input is already short (≤4 tokens) or the trim
+    would leave <3 chars."""
+    s = (text or "").strip()
+    if not s or len(s.split()) <= 4:
+        return s
+    # Pass 1: subject + verb
+    m = _SUBJECT_TRIM_RE.match(s)
+    if m:
+        candidate = m.group(1).strip().rstrip(".,;:")
+        if candidate and len(candidate) >= 3:
+            s = candidate
+    # Pass 2: leading verb phrase remaining ("born on", "constructed in")
+    m = _LEADING_VERB_RE.match(s)
+    if m:
+        candidate = s[m.end():].strip().rstrip(".,;:")
+        if candidate and len(candidate) >= 3:
+            s = candidate
+    return s
+
+
 def _is_abstention(text: str) -> bool:
     """Case-insensitive abstention match — canonical sentinel OR hedge
     phrase appearing in the final answer."""
@@ -372,6 +420,12 @@ def main():
                     pred = _fever_extract(pred_raw) or _extract_answer(pred_raw, source)
             else:
                 pred = _extract_answer(pred_raw, source)
+                if source == "MuSiQue":
+                    # Strip "<subject> <verb>" prefix when the model wraps
+                    # the answer in a sentence — recovers ~8/60 mid_f1 rows
+                    # from precision-penalty under token-F1 (e.g.
+                    # "Gustave Courbet was born on 10 June 1819" → "10 June 1819").
+                    pred = _trim_subject_prefix(pred)
 
             gold_field = "gold_label" if source == "FEVER" else "gold_answer"
             gold = _gold_as_list(row.get(gold_field))
