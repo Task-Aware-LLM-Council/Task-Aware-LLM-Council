@@ -55,11 +55,12 @@ from model_orchestration import (
 
 
 SYNTHESIZER_ROLE = "synthesizer"
-# Gemma-2-9B-GPTQ matches the docs/p4-report.md baseline (synthesizer was
-# Gemma-9B 8-bit, NOT DeepSeek-R1). DeepSeek-R1's safety-tuning hedges
-# aggressively on multi-hop synthesis, which depressed MuSiQue 0.75 → 0.40
-# in our config. Gemma-9B commits more readily.
-SYNTHESIZER_MODEL = "task-aware-llm-council/gemma-2-9b-it-GPTQ"
+# DeepSeek-R1-AWQ-2 outperformed Gemma-9B-GPTQ as synthesizer in our
+# validation runs (0.40 EM vs 0.18 EM on MuSiQue). The docs/p4-report.md
+# claims Gemma-9B was the baseline synthesizer that produced 0.75 EM, but
+# that result is not reproducible from the current adapter+prompt+
+# scoring stack. DeepSeek is the best-performing option we can ship.
+SYNTHESIZER_MODEL = "task-aware-llm-council/DeepSeek-R1-Distill-Qwen-7B-AWQ-2"
 
 _DECOMPOSER_CACHE_PATH = Path("artifacts/p4_decomposer_cache.jsonl")
 
@@ -311,10 +312,7 @@ def build_synthesizer_config() -> OrchestratorConfig:
                         "local_launch_bind": f"/scratch1/{get_current_user()}/.cache",
                         "local_launch_startup_timeout_seconds": 600.0,
                         "local_launch_gpu_memory_utilization": 0.50,
-                        # Gemma-9B-GPTQ → vLLM auto-detects gptq from the
-                        # model's config.json. DeepSeek-AWQ used
-                        # "compressed-tensors" but that string would conflict
-                        # with the GPTQ config now.
+                        "local_launch_quantization": "compressed-tensors",
                         "local_launch_use_gpu": True,
                     },
                 ),
@@ -550,12 +548,14 @@ async def main() -> int:
 
     # Only bump DeepSeek (reasoning/math_code, supports 128K natively).
     # Gemma-2-9b-it stays at 8192 — it physically can't go higher.
-    # Synthesizer is now Gemma-9B too, so no bump needed there either.
     specialist_config = _bump_max_model_len(
         build_default_local_vllm_orchestrator_config(),
         {"reasoning": 16384, "math_code": 16384},
     )
-    synthesizer_config = build_synthesizer_config()
+    synthesizer_config = _bump_max_model_len(
+        build_synthesizer_config(),
+        {SYNTHESIZER_ROLE: 16384},
+    )
 
     done_indices = _load_done_indices(args.out)
     if done_indices:
