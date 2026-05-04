@@ -365,12 +365,20 @@ def _max_tokens_for_source(source: str) -> int:
 
     HARDMath and HumanEval+ are force-routed to math_code (DeepSeek), which
     we bump to max_model_len=16384 so the full 8192-token output budget
-    fits even with prompt overhead. Other sources may route to gemma
-    (max_model_len=8192 per its config), so we cap their output at 4096
-    to leave 4K tokens of prompt headroom.
+    fits even with prompt overhead.
+
+    MuSiQue answers are short spans (entity names, dates, numbers) so 2048
+    is plenty — and we need to leave room for full router_dataset context
+    in --no-musique-oracle mode where prompts can be 4-6k tokens against
+    gemma's 8192 ceiling.
+
+    FEVER/QuALITY/other route to gemma (8192 model-len), so 4096 caps
+    output budget while leaving 4K for the prompt.
     """
     if source in ("HARDMATH", "HumanEvalPlus"):
         return 8192
+    if source == "MuSiQue":
+        return 2048
     return 4096
 
 
