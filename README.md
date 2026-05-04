@@ -3,7 +3,7 @@
 Monorepo for task-aware LLM benchmarking and council-style model policies. The
 workspace includes reusable packages for provider access, benchmark execution,
 task evaluation, local model orchestration, quantization, and policy runs.
-Main steps to reproduce the results are mentioned here - [Steps To Reproduce results](#steps-to-reproduce-results), but make sure to follow all the setup and prerequisite steps.
+Main steps to reproduce the results are mentioned here - [Steps To Reproduce Results](#steps-to-reproduce-results), but make sure to follow all the setup and prerequisite steps.
 
 ## Environment Setup
 
@@ -68,7 +68,7 @@ llm_gateway -> benchmarking_pipeline / model-orchestration
 model-orchestration -> council_policies
 
 ```
-# Steps To Reproduce results
+# Steps To Reproduce Results
 1. All these tests were done on CARC using a40, so make sure to get correct resources assigned.
 `srun --pty -p gpu --gres=gpu:a40:1 --account=robinjia_1822 --time=04:00:00 --cpus-per-task=8 --mem=64G bash`
 2. Run `module load apptainer` after resources are allocated. This is required to load apptainer runtime,
