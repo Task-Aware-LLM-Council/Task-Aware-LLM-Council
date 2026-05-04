@@ -206,7 +206,7 @@ def _musique_oracle_cache_path(source: str, split: str) -> Path:
 
 
 def _build_musique_oracle_map(
-    source: str = "bdsaglam/musique",
+    source: str = "dgslibisey/MuSiQue",
     split: str = "validation",
 ) -> dict[str, str]:
     """Build an {original_id -> oracle context} map from the upstream
@@ -387,14 +387,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--musique-oracle", dest="musique_oracle",
                    action="store_true", default=True,
                    help="Inject is_supporting-filtered oracle context from "
-                        "bdsaglam/musique for MuSiQue rows (default). Without "
+                        "dgslibisey/MuSiQue for MuSiQue rows (default). Without "
                         "oracle, the specialist sees router_dataset's full "
                         "distractor-packed context.")
     p.add_argument("--no-musique-oracle", dest="musique_oracle",
                    action="store_false",
                    help="Disable oracle injection (design B, distractor-full).")
-    p.add_argument("--musique-source", default="bdsaglam/musique",
-                   help="Upstream MuSiQue dataset to pull is_supporting flags from.")
+    p.add_argument("--musique-source", default="dgslibisey/MuSiQue",
+                   help="Upstream MuSiQue dataset to pull is_supporting flags from. "
+                        "Default dgslibisey/MuSiQue has 100%% is_supporting coverage; "
+                        "bdsaglam/musique has 88.8%% (lossy preprocessing).")
     p.add_argument("--musique-split", default="validation")
     p.add_argument(
         "--single-subtask-sources", default="FEVER,HumanEvalPlus,HARDMATH",
@@ -447,10 +449,11 @@ def build_requests(
 
         prompt_template: str | None = None
         if source == "MuSiQue":
-            # Oracle context: lookup by original_id in the bdsaglam/musique
-            # is_supporting-filtered map. Without oracle, router_dataset's
-            # default context is distractor-full — the specialist must search
-            # carefully via the CoT template.
+            # Oracle context: lookup by original_id in the dgslibisey/MuSiQue
+            # is_supporting-filtered map (100% coverage; bdsaglam loses 11%
+            # of flags). Without oracle, router_dataset's default context is
+            # distractor-full — the specialist must search carefully via the
+            # CoT template.
             if musique_oracle is not None:
                 original_id = row.get("original_id")
                 oracle_ctx = musique_oracle.get(str(original_id)) if original_id else None
